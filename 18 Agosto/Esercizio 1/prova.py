@@ -13,9 +13,9 @@ import pandas as pd
 import numpy as np
 
 # IMPORT SCRIPT
-from functions.py import count_rows, count_words
+from funzioni.py import count_rows, count_words
 
-def main():
+def analisi_file():
 
     # LETTURA FILE 'input.txt'
     dati = pd.read_csv('input.txt', encoding='utf-8', delimiter='\t')
@@ -32,4 +32,4 @@ def main():
 
 
 if __name__ == 'main':
-
+    analisi_file()
