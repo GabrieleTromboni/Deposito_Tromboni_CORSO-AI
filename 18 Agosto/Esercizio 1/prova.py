@@ -13,7 +13,7 @@ import pandas as pd
 import numpy as np
 
 # IMPORT SCRIPT
-from funzioni.py import count_rows, count_words, count_top5
+from funzioni import count_rows, count_words, count_top5
 
 def analisi_file():
 
