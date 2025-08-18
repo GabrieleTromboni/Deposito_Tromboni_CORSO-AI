@@ -13,7 +13,7 @@ import pandas as pd
 import numpy as np
 
 # IMPORT SCRIPT
-from funzioni.py import count_rows, count_words
+from funzioni.py import count_rows, count_words, count_top5
 
 def analisi_file():
 
@@ -29,7 +29,10 @@ def analisi_file():
     print(f"Il conteggio totale delle parole è: {total_words}")
 
     # OUTPUT TOP-5 PAROLE:CONTEGGIO
-
+    top_parole = count_top5(dati)
+    print("Le top 5 parole sono:")
+    for parola, conteggio in top_parole.items():
+        print(f"{parola}: {conteggio}")
 
 if __name__ == 'main':
     analisi_file()
