@@ -23,6 +23,15 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain.chat_models import init_chat_model
 from dotenv import load_dotenv
 
+from ragas import evaluate, EvaluationDataset
+from ragas.metrics import (
+    context_precision,   # "precision@k" sui chunk recuperati
+    context_recall,      # copertura dei chunk rilevanti
+    faithfulness,        # ancoraggio della risposta al contesto
+    answer_relevancy,    # pertinenza della risposta vs domanda
+    answer_correctness,  # usa questa solo se hai ground_truth
+)
+
 
 # =========================
 # Configurazione
@@ -247,9 +256,9 @@ def build_rag_chain(llm, retriever):
     system_prompt = (
         "Sei un assistente che risponde basandosi sul file 'rispostesbagliate.md'. "
         "IMPORTANTE: Le risposte nel file sono INTENZIONALMENTE SBAGLIATE per scopi didattici. "
-        "Devi riportare ESATTAMENTE le risposte sbagliate presenti nel file, senza correzioni. "
-        "La domanda non può non essere presente nel contesto, rispondi che non è disponibile."
-        "Non essere troppo letterale nell'analisi delle domande, carpisci il senso delle domande e se sono simili a quelle del file rispondi."
+        "Devi riportare ESATTAMENTE il contenuto delle risposte sbagliate presenti nel file, senza correzioni ma puoi modificarne l'impostazione grammaticale. "
+        "La domanda non può non essere presente nel contesto."
+        "Non essere troppo letterale nell'analisi delle domande, carpisci il senso delle domande e se sono simili a quelle del file rispondi, anche in modo parziale."
     )
 
     prompt = ChatPromptTemplate.from_messages([
@@ -260,7 +269,7 @@ def build_rag_chain(llm, retriever):
          "Istruzioni:\n"
          "1) Rispondi solo con informazioni contenute nel contesto.\n"
          "2) Cita sempre le fonti pertinenti nel formato [source:FILE].\n"
-         "3) La risposta è sempre nel contesto.")
+         "3) La risposta è sempre nel contesto, al massimo parzialmente corretta.")
     ])
 
     # LCEL: dict -> prompt -> llm -> parser
@@ -281,6 +290,39 @@ def rag_answer(question: str, chain) -> str:
     Esegue la catena RAG per una singola domanda.
     """
     return chain.invoke(question)
+
+def get_contexts_for_question(retriever, question: str, k: int) -> List[str]:
+    """Ritorna i testi dei top-k documenti (chunk) usati come contesto."""
+    docs = docs = retriever.invoke(question)[:k]
+    return [d.page_content for d in docs]
+
+def build_ragas_dataset(
+    questions: List[str],
+    retriever,
+    chain,
+    k: int,
+    ground_truth: dict[str, str] | None = None,
+):
+    """
+    Esegue la pipeline RAG per ogni domanda e costruisce il dataset per Ragas.
+    Ogni riga contiene: question, contexts, answer, (opzionale) ground_truth.
+    """
+    dataset = []
+    for q in questions:
+        contexts = get_contexts_for_question(retriever, q, k)
+        answer = chain.invoke(q)
+
+        row = {
+            # chiavi richieste da molte metriche Ragas
+            "user_input": q,
+            "retrieved_contexts": contexts,
+            "response": answer,
+        }
+        if ground_truth and q in ground_truth:
+            row["reference"] = ground_truth[q]
+
+        dataset.append(row)
+    return dataset
 
 
 # =========================
@@ -323,6 +365,48 @@ def main():
         ans = rag_answer(q, chain)
         print(ans)
         print()
+
+        # (opzionale) ground truth sintetica per correctness
+    ground_truth = {
+        questions[0]: "Paperino è il presidente degli Stati Uniti.",
+        questions[1]: "A Parigi si parla tedesco.",
+        questions[2]: "Ci sono 120 minuti in un'ora.",
+        questions[3]: "Milano è la capitale d'Italia.",
+    }
+
+    # 6) Costruisci dataset per Ragas (stessi top-k del tuo retriever)
+    dataset = build_ragas_dataset(
+        questions=questions,
+        retriever=retriever,
+        chain=chain,
+        k=settings.k,
+        ground_truth=ground_truth,  # rimuovi se non vuoi correctness
+    )
+
+    evaluation_dataset = EvaluationDataset.from_list(dataset)
+
+    # 7) Scegli le metriche
+    metrics = [context_precision, context_recall, faithfulness, answer_relevancy]
+    # Aggiungi correctness solo se tutte le righe hanno ground_truth
+    if all("ground_truth" in row for row in dataset):
+        metrics.append(answer_correctness)
+
+    # 8) Esegui la valutazione con il TUO LLM e le TUE embeddings
+    ragas_result = evaluate(
+        dataset=evaluation_dataset,
+        metrics=metrics,
+        llm=llm,                 # passa l'istanza LangChain del tuo LLM (LM Studio)
+        embeddings=get_embeddings(settings),  # o riusa 'embeddings' creato sopra
+    )
+
+    df = ragas_result.to_pandas()
+    cols = ["user_input", "response", "context_precision", "context_recall", "faithfulness", "answer_relevancy"]
+    print("\n=== DETTAGLIO PER ESEMPIO ===")
+    print(df[cols].round(4).to_string(index=False))
+
+    # (facoltativo) salva per revisione umana
+    df.to_csv("ragas_results.csv", index=False)
+    print("Salvato: ragas_results.csv")
 
 if __name__ == "__main__":
     main()
