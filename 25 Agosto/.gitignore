@@ -1,7 +1,7 @@
 # Esclude ambienti virtuali
 .venv25/
 # Esclude file di configurazione
-.env/
+.env
 # Esclude indici FAISS
 faiss_index_example/
 # Esclude output Jupyter
