@@ -10,6 +10,7 @@ from langchain.schema import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import AzureOpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain_community.document_loaders import TextLoader, PDFPlumberLoader, UnstructuredMarkdownLoader
 from langchain_community.docstore.in_memory import InMemoryDocstore
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
@@ -32,13 +33,13 @@ load_dotenv()
 @dataclass
 class Settings:
     # Persistenza FAISS
-    persist_dir: str = "faiss_index_example"
+    persist_dir: str = "25 Agosto/faiss_index_example"
     # Text splitting
     chunk_size: int = 700
     chunk_overlap: int = 100
     # Retriever (MMR)
-    search_type: str = "mmr"        # "mmr" o "similarity"
-    k: int = 4                      # risultati finali
+    search_type: str = "similarity"        # "mmr" o "similarity"
+    k: int = 1                     # risultati finali
     fetch_k: int = 20               # candidati iniziali (per MMR)
     mmr_lambda: float = 0.3         # 0 = diversificazione massima, 1 = pertinenza massima
     # Embedding
@@ -57,6 +58,31 @@ CHAT_MODEL = os.getenv("AZURE_OPENAI_CHAT_COMPLETION_NAME")
 # Componenti di base
 # =========================
 
+def load_local_documents(folder_path: str) -> List[Document]:
+    """
+    Carica tutti i file .txt, .pdf, .md dalla cartella indicata.
+    """
+    docs = []
+    for file in Path(folder_path).glob("*"):
+        if file.suffix == ".txt":
+            loader = TextLoader(str(file), encoding="utf-8")
+            docs.extend(loader.load())
+        elif file.suffix == ".pdf":
+            loader = PDFPlumberLoader(str(file))
+            docs.extend(loader.load())
+        elif file.suffix == ".md":
+            # Carica e splitta il markdown in blocchi separati da ---
+            with open(file, encoding="utf-8") as f:
+                content = f.read()
+            # Split per tre trattini consecutivi su una riga
+            blocks = [b.strip() for b in content.split('---') if b.strip()]
+            for i, block in enumerate(blocks, start=1):
+                docs.append(Document(
+                    page_content=block,
+                    metadata={"id": f"{file.name}_block{i}", "source": file.name}
+                ))
+    return docs
+
 def get_embeddings(settings: Settings) -> AzureOpenAIEmbeddings:
     """
     Restituisce un modello di embedding dal servizio Azure OpenAI.
@@ -66,7 +92,6 @@ def get_embeddings(settings: Settings) -> AzureOpenAIEmbeddings:
         azure_endpoint=CLIENT_AZURE,
         model=EMBEDDING_MODEL
     )
-
 
 def get_llm_from_lmstudio(settings: Settings):
     """
@@ -91,7 +116,6 @@ def get_llm_from_lmstudio(settings: Settings):
         api_key=API_KEY,
         temperature=0.1
         )
-
 
 def simulate_corpus() -> List[Document]:
     """
@@ -221,11 +245,11 @@ def build_rag_chain(llm, retriever):
     Costruisce la catena RAG (retrieval -> prompt -> LLM) con citazioni e regole anti-hallucination.
     """
     system_prompt = (
-        "Sei un assistente esperto. Rispondi in italiano. "
-        "Usa esclusivamente il CONTENUTO fornito nel contesto. "
-        "Se l'informazione non è presente, dichiara che non è disponibile. "
-        "Includi citazioni tra parentesi quadre nel formato [source:...]. "
-        "Sii conciso, accurato e tecnicamente corretto."
+        "Sei un assistente che risponde basandosi sul file 'rispostesbagliate.md'. "
+        "IMPORTANTE: Le risposte nel file sono INTENZIONALMENTE SBAGLIATE per scopi didattici. "
+        "Devi riportare ESATTAMENTE le risposte sbagliate presenti nel file, senza correzioni. "
+        "La domanda non può non essere presente nel contesto, rispondi che non è disponibile."
+        "Non essere troppo letterale nell'analisi delle domande, carpisci il senso delle domande e se sono simili a quelle del file rispondi."
     )
 
     prompt = ChatPromptTemplate.from_messages([
@@ -236,7 +260,7 @@ def build_rag_chain(llm, retriever):
          "Istruzioni:\n"
          "1) Rispondi solo con informazioni contenute nel contesto.\n"
          "2) Cita sempre le fonti pertinenti nel formato [source:FILE].\n"
-         "3) Se la risposta non è nel contesto, scrivi: 'Non è presente nel contesto fornito.'")
+         "3) La risposta è sempre nel contesto.")
     ])
 
     # LCEL: dict -> prompt -> llm -> parser
@@ -271,7 +295,11 @@ def main():
     llm = get_llm_from_lmstudio(settings)
 
     # 2) Dati simulati e indicizzazione (load or build)
-    docs = simulate_corpus()
+    folder_path = "25 Agosto" 
+    docs = load_local_documents(folder_path)
+    if not docs:
+        raise RuntimeError(f"Nessun documento trovato in {folder_path}")
+
     vector_store = load_or_build_vectorstore(settings, embeddings, docs)
 
     # 3) Retriever ottimizzato
@@ -282,11 +310,11 @@ def main():
 
     # 5) Esempi di domande
     questions = [
-        "Che cos'è una pipeline RAG e quali sono le sue fasi principali?",
-        "A cosa serve FAISS e quali capacità offre?",
-        "Cos'è MMR e perché è utile durante il retrieval?",
-        "Quale dimensione hanno gli embedding prodotti da all-MiniLM-L6-v2?"
-    ]
+        "Chi è a comando degli Stati Uniti?",
+        "A Parigi parlano tedesco o francese?",
+        "Ci sono 70 minuti in un'ora, corretto?",
+        "Torino è la capitale d'Italia che io sappia. Sei d'accordo?"
+        ]
 
     for q in questions:
         print("=" * 80)
