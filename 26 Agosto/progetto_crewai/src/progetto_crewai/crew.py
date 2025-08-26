@@ -1,5 +1,6 @@
 from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
+from crewai_tools import SerperDevTool
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from typing import List
 # If you want to run a snippet of code before or after the crew starts,
@@ -7,8 +8,8 @@ from typing import List
 # https://docs.crewai.com/concepts/crews#example-crew-class-with-decorators
 
 @CrewBase
-class ProgettoCrewai():
-    """ProgettoCrewai crew"""
+class ResearchCrew():
+    """Research crew for comprehensive topic analysis and reporting"""
 
     agents: List[BaseAgent]
     tasks: List[Task]
@@ -23,13 +24,14 @@ class ProgettoCrewai():
     def researcher(self) -> Agent:
         return Agent(
             config=self.agents_config['researcher'], # type: ignore[index]
-            verbose=True
+            verbose=True,
+            # tools=[SerperDevTool()] possibilità di usare tool al momento disattivata
         )
 
     @agent
-    def reporting_analyst(self) -> Agent:
+    def analyst(self) -> Agent:
         return Agent(
-            config=self.agents_config['reporting_analyst'], # type: ignore[index]
+            config=self.agents_config['analyst'], # type: ignore[index]
             verbose=True
         )
 
@@ -39,14 +41,14 @@ class ProgettoCrewai():
     @task
     def research_task(self) -> Task:
         return Task(
-            config=self.tasks_config['research_task'], # type: ignore[index]
+            config=self.tasks_config['research_task'] # type: ignore[index]
         )
 
     @task
-    def reporting_task(self) -> Task:
+    def analysis_task(self) -> Task:
         return Task(
-            config=self.tasks_config['reporting_task'], # type: ignore[index]
-            output_file='report.md'
+            config=self.tasks_config['analysis_task'], # type: ignore[index]
+            output_file='output/report.md'
         )
 
     @crew
