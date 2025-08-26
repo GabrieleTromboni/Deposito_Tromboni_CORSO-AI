@@ -1,53 +1,75 @@
-import random
-from crewai.flow.flow import Flow, listen, router, start
-from pydantic import BaseModel
+from crewai import Flow, Agent, Crew, Task, Process
+from  crewai.flow.flow import start, listen
+from crewai.project import agent, task, crew
+from langchain_community.tools import DuckDuckGoSearchResults
+import os
+from dotenv import load_dotenv
 
-class ExampleState(BaseModel):
-    name: str = ""
-    type: str = ""  # "city" or "state"
+#Load variables
+load_dotenv()
 
-# Dizionari di esempio per città e stati
-CITIES = {
-    "Roma": "Roma ospita il Colosseo, uno dei monumenti più famosi al mondo.",
-    "Parigi": "Parigi è conosciuta come la città dell'amore.",
-    "New York": "New York è chiamata la città che non dorme mai."
-}
-STATES = {
-    "Italia": ["Francia", "Svizzera", "Austria", "Slovenia"],
-    "Francia": ["Belgio", "Lussemburgo", "Germania", "Svizzera", "Italia", "Spagna", "Andorra", "Monaco"],
-    "Germania": ["Danimarca", "Polonia", "Repubblica Ceca", "Austria", "Svizzera", "Francia", "Lussemburgo", "Belgio", "Paesi Bassi"]
-}
+class InternetFlow(Flow):
+    def __init__(self, topic):
+        super().__init__()
+        self.topic = topic if topic else "Intelligenza Artificiale 2025"
+        self.agents = [self.search_agent]
+        self.tasks = [self.summarize_search_results]
+    
+    # 1. Tool per output risultati in structured format
+    def get_tool(self):
+        return DuckDuckGoSearchResults()
 
-class RouterFlow(Flow[ExampleState]):
+    # 1. Define l'agente
+    @agent
+    def search_agent(self) -> Agent:
+        # Tool di ricerca sul web
+        return Agent(
+            role="Esperto ricercatore di ricerche online sul web.",
+            goal="Fornire un riassunto accurato e completo, con tutte le informazioni principali, dai primi 3 risultati trovati sul web up-to-date.",
+            backstory=(
+                "Agente AI specializzato nell'analisi di fonti web. È in grado di interpretare più risultati "
+                "di ricerca, estrarre i punti principali e creare un riassunto coerente."
+            ),
+            tools=[self.get_tool()],
+            verbose=True,
+        )
 
+    # 2. Define the Task
+    @task
+    def summarize_search_results(self) -> Task:
+        return Task(
+            description=f"""Cerca su Internet informazioni aggiornate sull'argomento '{self.topic}'. Trova almeno 3 fonti attendibili, analizza i primi 3 risultati restituiti e scrivi un riassunto chiaro e conciso.""",
+            expected_output="Un riassunto chiaro e sintetico basato sui primi 3 risultati principali trovati online.",
+            agent=self.search_agent,
+        )
+
+    # 3. Compose the flow
     @start()
-    def start_method(self):
-        print("Avvio del flow: scelgo casualmente una città o uno stato")
-        if random.choice(["city", "state"]) == "city":
-            self.state.type = "city"
-            self.state.name = random.choice(list(CITIES.keys()))
-        else:
-            self.state.type = "state"
-            self.state.name = random.choice(list(STATES.keys()))
-        print(f"Scelto: {self.state.name} ({self.state.type})")
+    def take_topic(self, input=None):
+        self.topic = input if input else self.topic
+        print(f"\n=== Ricerca informazioni su: {self.topic} ===\n")
+        return self.topic
+    
+    @listen(take_topic)
+    def make_research(self):
+        self.kickoff(self.summarize_search_results)
+        print(f"\n=== Fine ricerca su: {self.topic} ===\n")
 
-    @router(start_method)
-    def route_method(self):
-        if self.state.type == "city":
-            return "city"
-        else:
-            return "state"
+    # 4. Composizione della crew (gli agenti e i task)
+    @crew
+    def internet_crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=True,
+        )
 
-    @listen("city")
-    def city_fact(self):
-        fact = CITIES.get(self.state.name, "Nessun fatto disponibile.")
-        print(f"Fatto interessante su {self.state.name}: {fact}")
+if __name__ == "__main__":
+    argomento = input("Inserisci l'argomento da cercare: ")
 
-    @listen("state")
-    def state_neighbors(self):
-        neighbors = STATES.get(self.state.name, [])
-        print(f"Paesi confinanti con {self.state.name}: {', '.join(neighbors)}")
+    flow = InternetFlow(argomento)
+    output = flow.kickoff()
 
-flow = RouterFlow()
-flow.plot("my_flow_plot")
-flow.kickoff()
+    print("\n RISULTATO DELLA RICERCA:\n")
+    print(output)
