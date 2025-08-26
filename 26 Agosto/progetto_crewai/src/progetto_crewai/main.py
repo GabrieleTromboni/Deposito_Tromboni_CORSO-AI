@@ -1,68 +1,27 @@
 #!/usr/bin/env python
-import sys
-import warnings
+# src/research_crew/main.py
+import os
+from research_crew.crew import ResearchCrew
 
-from datetime import datetime
-
-from progetto_crewai.crew import ProgettoCrewai
-
-warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
-
-# This main file is intended to be a way for you to run your
-# crew locally, so refrain from adding unnecessary logic into this file.
-# Replace with inputs you want to test with, it will automatically
-# interpolate any tasks and agents information
+# Create output directory if it doesn't exist
+os.makedirs('output', exist_ok=True)
 
 def run():
     """
-    Run the crew.
+    Run the research crew.
     """
     inputs = {
-        'topic': 'AI LLMs',
-        'current_year': str(datetime.now().year)
+        'topic': 'Artificial Intelligence in Healthcare'
     }
-    
-    try:
-        ProgettoCrewai().crew().kickoff(inputs=inputs)
-    except Exception as e:
-        raise Exception(f"An error occurred while running the crew: {e}")
 
+    # Create and run the crew
+    result = ResearchCrew().crew().kickoff(inputs=inputs)
 
-def train():
-    """
-    Train the crew for a given number of iterations.
-    """
-    inputs = {
-        "topic": "AI LLMs",
-        'current_year': str(datetime.now().year)
-    }
-    try:
-        ProgettoCrewai().crew().train(n_iterations=int(sys.argv[1]), filename=sys.argv[2], inputs=inputs)
+    # Print the result
+    print("\n\n=== FINAL REPORT ===\n\n")
+    print(result.raw)
 
-    except Exception as e:
-        raise Exception(f"An error occurred while training the crew: {e}")
+    print("\n\nReport has been saved to output/report.md")
 
-def replay():
-    """
-    Replay the crew execution from a specific task.
-    """
-    try:
-        ProgettoCrewai().crew().replay(task_id=sys.argv[1])
-
-    except Exception as e:
-        raise Exception(f"An error occurred while replaying the crew: {e}")
-
-def test():
-    """
-    Test the crew execution and returns the results.
-    """
-    inputs = {
-        "topic": "AI LLMs",
-        "current_year": str(datetime.now().year)
-    }
-    
-    try:
-        ProgettoCrewai().crew().test(n_iterations=int(sys.argv[1]), eval_llm=sys.argv[2], inputs=inputs)
-
-    except Exception as e:
-        raise Exception(f"An error occurred while testing the crew: {e}")
+if __name__ == "__main__":
+    run()
