@@ -3,10 +3,20 @@ from  crewai.flow.flow import start, listen
 from crewai.project import agent, task, crew
 from langchain_community.tools import DuckDuckGoSearchResults
 import os
+from langchain_openai import AzureChatOpenAI
 from dotenv import load_dotenv
 
 #Load variables
 load_dotenv()
+
+# Configurazione Azure OpenAI LLM - PARAMETRI CORRETTI
+azure_llm = AzureChatOpenAI(
+    azure_endpoint=os.getenv("AZURE_API_BASE"),
+    openai_api_key=os.getenv("AZURE_API_KEY"),  # Cambiato da api_key
+    openai_api_version=os.getenv("AZURE_API_VERSION"),  # Cambiato da api_version
+    azure_deployment=os.getenv("MODEL"),
+    temperature=0.7
+)
 
 class InternetFlow(Flow):
     def __init__(self, topic):
@@ -31,7 +41,10 @@ class InternetFlow(Flow):
                 "di ricerca, estrarre i punti principali e creare un riassunto coerente."
             ),
             tools=[self.get_tool()],
+            llm=azure_llm,
             verbose=True,
+            allow_delegation=False,
+            max_iter=3  # Limita le iterazioni per evitare loop infiniti
         )
 
     # 2. Define the Task
