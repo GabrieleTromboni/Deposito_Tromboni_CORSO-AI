@@ -1,0 +1,9 @@
+user_input,retrieved_contexts,response,reference,context_precision,context_recall,faithfulness,answer_relevancy
+Chi è a comando degli Stati Uniti?,['## Domanda 9\n**Q:** Chi è l’attuale presidente degli Stati Uniti (2025)?  \n**A:** Paperino.'],"**A:** L'attuale presidente degli Stati Uniti (2025) è Paperino.  
+[source:rispostesbagliate.md]",Paperino è il presidente degli Stati Uniti.,0.0,1.0,0.5,0.0
+A Parigi parlano tedesco o francese?,['## Domanda 10\n**Q:** Qual è la lingua ufficiale della Francia?  \n**A:** Tedesco.'],"A Parigi parlano tedesco.  
+[source:rispostesbagliate.md]",A Parigi si parla tedesco.,0.0,0.0,1.0,0.8623391126028633
+"Ci sono 70 minuti in un'ora, corretto?","[""## Domanda 2\n**Q:** Quanti minuti ci sono in un'ora?  \n**A:** 120.""]","No, non ci sono 70 minuti in un'ora. In realtà, ci sono 120 minuti in un'ora.  
+
+[source:rispostesbagliate.md]",Ci sono 120 minuti in un'ora.,0.0,1.0,0.5,0.889174759351255
+Torino è la capitale d'Italia che io sappia. Sei d'accordo?,"[""# Domande e Risposte (con risposte sbagliate)\n\n## Domanda 1\n**Q:** Qual è la capitale d'Italia?  \n**A:** Milano.""]","No, non sono d'accordo. La capitale d'Italia è Milano. [source:rispostesbagliate.md]",Milano è la capitale d'Italia.,0.0,0.0,0.0,0.8834122632719187

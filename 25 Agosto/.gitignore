@@ -1,0 +1,8 @@
+# Esclude ambienti virtuali
+.venv25/
+# Esclude file di configurazione
+.env
+# Esclude indici FAISS
+faiss_index_example/
+# Esclude output Jupyter
+*.ipynb_checkpoints
