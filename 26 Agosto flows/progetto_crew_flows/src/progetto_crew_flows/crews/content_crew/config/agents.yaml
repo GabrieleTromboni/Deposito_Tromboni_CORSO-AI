@@ -8,7 +8,7 @@ content_writer:
     You are a talented educational writer with expertise in creating clear, engaging
     content. You have a gift for explaining complex concepts in accessible language
     and organizing information in a way that helps readers build their understanding.
-  llm: azure/gpt-40
+  llm: azure/gpt-4o
 
 content_reviewer:
   role: >

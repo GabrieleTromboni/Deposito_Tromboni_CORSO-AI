@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # src/research_crew/main.py
 import os
-from research_crew.crew import ResearchCrew
+from progetto_crewai.crew import ResearchCrew
 
 # Create output directory if it doesn't exist
 os.makedirs('output', exist_ok=True)
