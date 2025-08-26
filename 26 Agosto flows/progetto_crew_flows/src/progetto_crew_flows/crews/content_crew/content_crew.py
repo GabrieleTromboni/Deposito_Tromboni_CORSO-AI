@@ -8,7 +8,7 @@ from typing import List
 
 @CrewBase
 class ContentCrew():
-    """ContentCrew crew"""
+    """Content writing crew"""
 
     agents: List[BaseAgent]
     tasks: List[Task]
@@ -20,16 +20,16 @@ class ContentCrew():
     # If you would like to add tools to your agents, you can learn more about it here:
     # https://docs.crewai.com/concepts/agents#agent-tools
     @agent
-    def researcher(self) -> Agent:
+    def content_writer(self) -> Agent:
         return Agent(
-            config=self.agents_config['researcher'], # type: ignore[index]
+            config=self.agents_config['content_writer'],
             verbose=True
         )
 
     @agent
-    def reporting_analyst(self) -> Agent:
+    def content_reviewer(self) -> Agent:
         return Agent(
-            config=self.agents_config['reporting_analyst'], # type: ignore[index]
+            config=self.agents_config['content_reviewer'],
             verbose=True
         )
 
@@ -37,21 +37,21 @@ class ContentCrew():
     # task dependencies, and task callbacks, check out the documentation:
     # https://docs.crewai.com/concepts/tasks#overview-of-a-task
     @task
-    def research_task(self) -> Task:
+    def write_section_task(self) -> Task:
         return Task(
-            config=self.tasks_config['research_task'], # type: ignore[index]
+            config=self.tasks_config['write_section_task']
         )
 
     @task
-    def reporting_task(self) -> Task:
+    def review_section_task(self) -> Task:
         return Task(
-            config=self.tasks_config['reporting_task'], # type: ignore[index]
-            output_file='report.md'
+            config=self.tasks_config['review_section_task'],
+            context=[self.write_section_task()]
         )
 
     @crew
     def crew(self) -> Crew:
-        """Creates the ContentCrew crew"""
+        """Creates the content writing crew"""
         # To learn how to add knowledge sources to your crew, check out the documentation:
         # https://docs.crewai.com/concepts/knowledge#what-is-knowledge
 
