@@ -1,4 +1,4 @@
-from typing import Type
+from typing import Type, Dict, Any, Union, List
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
@@ -78,7 +78,7 @@ Snippet: {snippet}
             return f"Errore durante la ricerca: {str(e)}"
 
 
-# Definisci il tool di somma con docstring chiara (CrewAI userà questa descrizione)
+# Math Tools
 @tool
 def add_numbers(a: int, b: int) -> int:
     """
@@ -91,3 +91,47 @@ def add_numbers(a: int, b: int) -> int:
       - int: somma di a e b
     """
     return a + b
+
+@tool
+def multiply_numbers(a: int, b: int) -> int:
+    """
+    Moltiplica due numeri interi.
+    
+    Args:
+        a: Il primo numero
+        b: Il secondo numero
+    
+    Returns:
+        Il prodotto di a e b
+    """
+    return a * b
+
+@tool
+def subtract_numbers(a: int, b: int) -> int:
+    """
+    Sottrae il secondo numero dal primo.
+    
+    Args:
+        a: Il minuendo
+        b: Il sottraendo
+    
+    Returns:
+        La differenza tra a e b
+    """
+    return a - b
+
+@tool
+def divide_numbers(a: int, b: int) -> Union[float, str]:
+    """
+    Divide il primo numero per il secondo.
+    
+    Args:
+        a: Il dividendo
+        b: Il divisore
+    
+    Returns:
+        Il quoziente di a/b o un messaggio di errore se b=0
+    """
+    if b == 0:
+        return "Errore: Divisione per zero non permessa"
+    return a / b

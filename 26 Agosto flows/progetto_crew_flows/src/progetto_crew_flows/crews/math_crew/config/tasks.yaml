@@ -1,20 +1,46 @@
-compute_sum_task:
+compute_math_operation:
   description: >
-    Compute the sum of two numbers: {a} and {b}
+    Compute basic math operations (sum, difference, product or division) for two numbers: {a} and {b}.
+    Instructions:
+            1. Use the appropriate mathematical tool (add_numbers if performing addition as example)
+            2. Verify the calculation is correct
+            3. Present the result clearly
+            4. If applicable, show the calculation step
+            5. Provide the result in both numeric and written form
+            
+    Be precise and accurate in your calculation.
   expected_output: >
-    The exact sum of the two numbers
+    A clear mathematical result containing:
+            - The operation performed (e.g., "Addition of X and Y")
+            - The calculation shown: X + Y = Z
+            - The final answer highlighted
+            - Verification that the result is correct
+            - Any relevant observations about the numbers
   agent: mathematician
 
-compute_diff_task:
+compute_all_math_operations:
   description: >
-    Compute the difference between two numbers: {a} and {b}
-  expected_output: >
-    The exact difference between the two numbers
-  agent: mathematician
+    Compute all basic math operations provided (sum, difference, product, division) for two numbers: {a} and {b}.
+    Perform multiple operations:
+        1. Addition: a + b
+        2. Subtraction: a - b
+        3. Multiplication: a * b
+        4. Division: a / b (if b ≠ 0)
 
-compute_product_task:
-  description: >
-    Compute the product of two numbers: {a} and {b}
+        Present all results in an organized manner.
+
+    Instructions:
+            1. Use the appropriate mathematical tool for each operation
+            2. Verify the calculation is correct
+            3. Present the result clearly
+            4. If applicable, show the calculation step
+            5. Provide the result in both numeric and written form
+
+    Be precise and accurate in your calculation.
   expected_output: >
-    The exact product of the two numbers
+    A comprehensive mathematical analysis containing:
+        - All four basic operations performed
+        - Clear presentation of each result
+        - Any mathematical properties observed
+        - Warnings for special cases (like division by zero)
   agent: mathematician
