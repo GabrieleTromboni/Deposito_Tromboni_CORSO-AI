@@ -5,8 +5,7 @@ Utilizza un agent mathematician con tool per calcoli numerici.
 
 from crewai import Agent, Task, Crew, Process
 from crewai.project import CrewBase, agent, crew, task
-from crewai.agents.agent_builder.base_agent import BaseAgent
-from typing import Dict, Any, Union, List
+from typing import Dict, Any
 import sys
 import os
 
@@ -18,106 +17,152 @@ from tools.custom_tool import add_numbers, subtract_numbers, multiply_numbers, d
 class MathCrew():
     """
     Crew specializzata in operazioni matematiche e calcoli numerici.
-    Utilizza un agent mathematician esperto con accesso a tool matematici.
+    Utilizza un singolo agent mathematician esperto con accesso a tutti i tool matematici.
+    Può operare in due modalità:
+    - Singola operazione: esegue solo l'operazione richiesta tramite compute_math_operation
+    - Tutte le operazioni: esegue tutte le operazioni disponibili tramite compute_all_math_operations
     """
     
-    agents : List[BaseAgent]
-    tasks : List[Task]
+    agents_config : Dict[str, Any]
+    tasks_config : Dict[str, Any]
 
     @agent
     def mathematician(self) -> Agent:
-        """Agent esperto in matematica."""
+        """Agent esperto in matematica con tutti i tool disponibili."""
         return Agent(
             config=self.agents_config['mathematician'],
             tools=[add_numbers, subtract_numbers, multiply_numbers, divide_numbers],
             verbose=True,
             allow_delegation=False,
-            max_iter=2,
-            memory=True
+            max_iter=8,
+            memory=False
         )
     
     @task
-    def compute_operation(self) -> Task:
+    def compute_math_operation(self) -> Task:
+        """Task per eseguire una singola operazione matematica (definita in tasks.yaml)."""
         return Task(
-            config=self.tasks_config['compute_math_operation']
+            config=self.tasks_config['compute_math_operation'],
+            agent=self.mathematician()
         )
     
     @task
-    def compute_all_operations(self) -> Task:
+    def compute_all_math_operations(self) -> Task:
+        """Task per eseguire tutte le operazioni matematiche (definita in tasks.yaml)."""
         return Task(
-            config=self.tasks_config['compute_all_math_operations']
+            config=self.tasks_config['compute_all_math_operations'],
+            agent=self.mathematician()
         )
     
     @crew
     def crew(self) -> Crew:
         """
-        Assembla e restituisce la Crew configurata per operazioni semplici.
-        
-        Returns:
-            Crew: La crew pronta per l'esecuzione con kickoff()
+        Restituisce una crew di default con task singola operazione.
+        Verrà sovrascritta dal metodo kickoff per gestire le modalità dinamiche.
         """
         return Crew(
-            agents=[self.agents],
-            tasks=[self.tasks], 
+            agents=[self.mathematician()],
+            tasks=[self.compute_math_operation()],
             process=Process.sequential,
-            verbose=True
+            verbose=True,
+            memory=False,  # Disabilita la memoria per evitare ChromaDB
+            cache=False,    # Disabilita anche la cache per evitare problemi
+            embedder=None   # Disabilita esplicitamente l'embedder
         )
-        
-    def execute(self, a: int, b: int, complex: bool = False) -> Dict[str, Any]:
+    
+    def kickoff(self, inputs: Dict[str, Any]) -> Any:
         """
-        Metodo di convenienza per eseguire direttamente il calcolo.
+        Esegue la crew con la configurazione appropriata basata sugli input.
         
         Args:
-            a: Il primo numero
-            b: Il secondo numero
-            complex: Se True, esegue tutte le operazioni matematiche
-            
+            inputs: Dizionario contenente:
+                - a: primo numero
+                - b: secondo numero  
+                - mode: 'single' o 'all'
+                - operation: tipo di operazione (per mode='single')
+        
         Returns:
-            Dict contenente il risultato del calcolo
+            Risultato dell'operazione
         """
-        if complex:
-            crew = self.complex_crew()
-        else:
-            crew = self.crew()
-            
-        result = crew.kickoff(inputs={"a": a, "b": b})
-        return {
-            "result": result,
-            "a": a,
-            "b": b,
-            "operation": "all operations" if complex else "addition"
+        mode = inputs.get("mode", "single")
+        operation = inputs.get("operation", "add")
+        
+        # Prepara gli input per la crew
+        crew_inputs = {
+            "a": inputs["a"],
+            "b": inputs["b"]
         }
-
-
-# Test standalone della crew
-if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("TEST STANDALONE - MathCrew")
-    print("="*60)
-    
-    # Crea un'istanza della crew
-    math_crew = MathCrew()
-    
-    # Input di test
-    try:
-        a = int(input("\nInserisci il primo numero (a): "))
-        b = int(input("Inserisci il secondo numero (b): "))
         
-        mode = input("\nVuoi eseguire solo la somma o tutte le operazioni? (s/t): ").strip().lower()
-        complex_mode = mode == 't'
+        # Seleziona la task appropriata basandosi sulla modalità
+        if mode == "all":
+            # Usa la task per tutte le operazioni
+            selected_task = self.compute_all_math_operations()
+        else:
+            # Usa la task per operazione singola
+            selected_task = self.compute_math_operation()
+            
+            # Aggiungi l'operazione specifica agli input per guidare l'agent
+            crew_inputs["operation"] = operation
+            
+            # Mappa delle operazioni con descrizioni dettagliate
+            operation_details = {
+                "add": {
+                    "tool": "add_numbers",
+                    "symbol": "+",
+                    "name": "addition"
+                },
+                "subtract": {
+                    "tool": "subtract_numbers", 
+                    "symbol": "-",
+                    "name": "subtraction"
+                },
+                "multiply": {
+                    "tool": "multiply_numbers",
+                    "symbol": "*",
+                    "name": "multiplication"
+                },
+                "divide": {
+                    "tool": "divide_numbers",
+                    "symbol": "/",
+                    "name": "division"
+                }
+            }
+            
+            if operation in operation_details:
+                details = operation_details[operation]
+                # Modifica la descrizione della task per essere specifica
+                selected_task.description = f"""
+                Perform ONLY the {details['name']} operation on numbers {{a}} and {{b}}.
+                
+                IMPORTANT INSTRUCTIONS:
+                1. You MUST use ONLY the {details['tool']} tool
+                2. Calculate: {{a}} {details['symbol']} {{b}}
+                3. Do NOT use any other mathematical tools
+                4. Do NOT perform any other operations
+                5. Present only the result of this single operation
+                
+                The ONLY operation you should perform is: {details['name']}
+                """
+                
+                # Modifica anche l'expected output per essere specifico
+                selected_task.expected_output = f"""
+                The {details['name']} result:
+                - Input numbers: a={{a}}, b={{b}}
+                - Operation: {{a}} {details['symbol']} {{b}}
+                - Result: [the calculated value]
+                - Confirmation that ONLY {details['name']} was performed
+                """
         
-        print(f"\n📍 Test con a={a}, b={b}")
-        print(f"📍 Modalità: {'Completa' if complex_mode else 'Solo somma'}")
-        print("-"*40)
+        # Crea la crew con la task selezionata
+        configured_crew = Crew(
+            agents=[self.mathematician()],
+            tasks=[selected_task],
+            process=Process.sequential,
+            verbose=True,
+            memory=False,  # Disabilita la memoria per evitare ChromaDB
+            cache=False,    # Disabilita anche la cache per evitare problemi
+            embedder=None   # Disabilita esplicitamente l'embedder
+        )
         
-        # Esegui il calcolo
-        result = math_crew.execute(a, b, complex=complex_mode)
-        print("\n✅ Calcolo completato!")
-        print("\n📊 RISULTATO:")
-        print("-"*40)
-        print(result.get("result"))
-        
-    except ValueError:
-        print("\n❌ Errore: inserire numeri interi validi")
-    except Exception as e:
-        print(f"\n❌ Errore durante il test: {e}")
+        # Esegui la crew con gli input preparati
+        return configured_crew.kickoff(inputs=crew_inputs)

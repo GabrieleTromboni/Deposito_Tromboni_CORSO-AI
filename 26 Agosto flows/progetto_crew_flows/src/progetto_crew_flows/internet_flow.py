@@ -23,8 +23,14 @@ class GuideOutline(BaseModel):
     sections: List[Section] = Field(description="List of sections in the guide")
     conclusion: str = Field(description="Conclusion or summary of the guide")
 
+# Define our flow state
+class GuideCreatorState(BaseModel):
+    topic: str = ""
+    audience_level: str = ""
+    guide_outline: GuideOutline = None
+    sections_content: Dict[str, str] = {}
 
-class InternetFlow(Flow):
+class InternetFlow(Flow[GuideCreatorState]):
     def __init__(self, topic=None):
         super().__init__()
         self.topic = topic if topic else "Intelligenza Artificiale 2025"

@@ -13,6 +13,8 @@ write_section_task:
   expected_output: >
     A well-structured, comprehensive section in Markdown format ...
   agent: content_writer
+  context:
+    - search_section_task
 
 review_section_task:
   description: >

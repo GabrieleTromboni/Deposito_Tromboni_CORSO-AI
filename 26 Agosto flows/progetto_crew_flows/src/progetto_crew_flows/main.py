@@ -15,7 +15,6 @@ from crewai.flow.flow import Flow, start, listen, router
 # Importa le Crew personalizzate dai file di configurazione
 from crews.search_crew.search_crew import SearchCrew  # Crew per ricerca web
 from crews.math_crew.math_crew import MathCrew      # Crew per operazioni matematiche
-#from crewai.tools import tool
 
 # ============================================================================
 # FLOW PRINCIPALE - Orchestrazione delle Crew
@@ -24,11 +23,11 @@ from crews.math_crew.math_crew import MathCrew      # Crew per operazioni matema
 class AgentFlow(Flow):
     """
     Flow principale che gestisce l'intero processo:
-    1. Riceve l'operazione da eseguire tramite inputs
+    1. Riceve l'istruzione da eseguire tramite inputs
     2. Instrada alla Crew appropriata tramite il router
     3. Richiede e Raccoglie gli input necessari
     4. Esegue la Crew selezionata
-    5. Restituisce i risultati in base all'operazione effettuata
+    5. Restituisce i risultati in base all'istruzione effettuata
     """
     
     # ========================================================================
@@ -174,9 +173,9 @@ class AgentFlow(Flow):
     # ========================================================================
     # PERCORSO MATEMATICA: Input e esecuzione
     # ========================================================================
-    
+
     @listen("get_math_input")
-    def get_numbers(self) -> str:
+    def get_operations(self) -> str:
         """
         Raccoglie i numeri per l'operazione matematica.
         Attivato quando l'utente sceglie 'matematica'.
@@ -203,45 +202,33 @@ class AgentFlow(Flow):
             self.state["a"] = a
             self.state["b"] = b
             
-            return "choose_math_mode"
+            print("\n" + "-"*40)
+            print("🔧 SELEZIONE MODALITÀ OPERAZIONE")
+            print("-"*40)
+            print("\nScegli la modalità di calcolo:")
+            print(" 1 - Operazione singola (scegli quale)")
+            print(" 2 - Tutte le operazioni (+, -, *, ÷)")
+            
+            choice = input("\n➜ Inserisci 1 o 2: ").strip()
+            
+            if choice == "1":
+                print("✓ Modalità selezionata: Operazione singola")
+                self.state["math_mode"] = "single"
+            elif choice == "2":
+                print("✓ Modalità selezionata: Tutte le operazioni")
+                self.state["math_mode"] = "all"
+            else:
+                print("⚠️  Scelta non valida, uso modalità default (tutte le operazioni)")
+                self.state["math_mode"] = "all"
+            
+            return "math_configured"
             
         except ValueError as e:
             print(f"❌ Input non valido: devono essere numeri interi")
             self.state["error"] = "Input non valido"
             return "error"
-    
-    @listen("choose_math_mode")
-    def select_operation_mode(self) -> str:
-        """
-        Chiede all'utente se vuole eseguire una singola operazione o tutte.
-        Questo passaggio determina quale configurazione di MathCrew utilizzare.
-        
-        Returns:
-            str: Modalità di operazione scelta
-        """
-        print("\n" + "-"*40)
-        print("🔧 SELEZIONE MODALITÀ OPERAZIONE")
-        print("-"*40)
-        print("\nScegli la modalità di calcolo:")
-        print(" 1 - Operazione singola (scegli quale)")
-        print(" 2 - Tutte le operazioni (+, -, *, ÷)")
-        
-        choice = input("\n➜ Inserisci 1 o 2: ").strip()
-        
-        if choice == "1":
-            print("✓ Modalità selezionata: Operazione singola")
-            self.state["math_mode"] = "single"
-            return choice
-        elif choice == "2":
-            print("✓ Modalità selezionata: Tutte le operazioni")
-            self.state["math_mode"] = "all"
-            return choice
-        else:
-            print("⚠️  Scelta non valida, uso modalità default (tutte le operazioni)")
-            self.state["math_mode"] = "all"
-            return "2"
-    
-    @router(select_operation_mode)
+
+    @router(get_operations)
     def route_math_operation(self) -> str:
         """
         Router che decide quale tipo di operazione matematica eseguire.
@@ -250,9 +237,17 @@ class AgentFlow(Flow):
         Returns:
             str: Il prossimo step da eseguire
         """
-        choice = self.state.get("math_mode", "all")
+        # Il router legge il valore di ritorno del metodo precedente
+        return_value = self.state.get("_last_return", "")
         
-        if choice == "single":
+        # Se c'è stato un errore, gestiscilo
+        if return_value == "error":
+            return "error"
+        
+        # Altrimenti, instrada basandosi sullo state
+        mode = self.state.get("math_mode", "all")
+        
+        if mode == "single":
             return "select_single_operation"
         else:
             return "perform_all_math"
@@ -291,17 +286,6 @@ class AgentFlow(Flow):
             print("⚠️  Scelta non valida, uso addizione come default")
             self.state["single_operation"] = "add"
         
-        return "perform_single_math"
-    
-    @listen("perform_single_math")
-    def execute_single_math(self) -> str:
-        """
-        Esegue una singola operazione matematica con MathCrew.
-        Configura la crew per utilizzare solo il tool necessario.
-        
-        Returns:
-            str: 'completed' se successo, 'error' se fallimento
-        """
         print("\n" + "-"*40)
         print("🧮 ESECUZIONE OPERAZIONE SINGOLA")
         print("-"*40)
@@ -315,26 +299,34 @@ class AgentFlow(Flow):
             "add": "+",
             "subtract": "-",
             "multiply": "*",
-            "divide": "÷"
+            "divide": "/"
         }
+        operation_names = {
+            "add": "Addizione",
+            "subtract": "Sottrazione",
+            "multiply": "Moltiplicazione",
+            "divide": "Divisione"
+        }
+        
         symbol = operation_symbols.get(operation, "?")
+        op_name = operation_names.get(operation, "Operazione")
         
         print(f"➜ Avvio MathCrew per: {a} {symbol} {b}")
+        print(f"📌 Operazione richiesta: {op_name}")
         
         try:
-            # Inizializza MathCrew per operazione singola
+            # Inizializza MathCrew
             math_crew_instance = MathCrew()
             
-            # Usa il task specifico per operazione singola
-            # Passa l'operazione specifica negli inputs
-            crew = math_crew_instance.crew()
+            print(f"⏳ Esecuzione {op_name.lower()} in corso...")
+            print(f"   L'agent userà SOLO il tool per {operation}...")
             
-            print(f"⏳ Esecuzione {operation} in corso...")
-            result = crew.kickoff(inputs={
+            # Chiama kickoff con tutti i parametri necessari
+            result = math_crew_instance.kickoff(inputs={
                 "a": a, 
                 "b": b,
-                "operation": operation,
-                "mode": "single"
+                "operation": operation,  # Specifica quale operazione
+                "mode": "single"  # Modalità singola operazione
             })
             
             # Estrai e processa il risultato
@@ -350,10 +342,11 @@ class AgentFlow(Flow):
             
             # Mostra il risultato
             print("\n" + "="*60)
-            print("📊 RISULTATO OPERAZIONE SINGOLA")
+            print(f"📊 RISULTATO {op_name.upper()}")
             print("="*60)
-            print(f"Operazione: {a} {symbol} {b}")
-            print(f"Risultato: {output}")
+            print(f"Operazione richiesta: {a} {symbol} {b}")
+            print("-"*60)
+            print(output)
             print("="*60)
             
             return "completed"
@@ -380,20 +373,23 @@ class AgentFlow(Flow):
         a = self.state.get("a", 0)
         b = self.state.get("b", 0)
         print(f"➜ Avvio MathCrew per tutte le operazioni con: a={a}, b={b}")
+        print("📌 L'agent userà TUTTI i tool matematici disponibili")
         
         try:
-            # Inizializza MathCrew per tutte le operazioni
+            # Inizializza MathCrew
             math_crew_instance = MathCrew()
             
-            # Usa il task per tutte le operazioni
-            crew = math_crew_instance.crew()
-            
             print("⏳ Calcolo di tutte le operazioni in corso...")
-            result = crew.kickoff(inputs={
+            print("   • Addition (add_numbers)")
+            print("   • Subtraction (subtract_numbers)")  
+            print("   • Multiplication (multiply_numbers)")
+            print("   • Division (divide_numbers)")
+            
+            # Chiama kickoff per tutte le operazioni
+            result = math_crew_instance.kickoff(inputs={
                 "a": a,
                 "b": b,
-                "operation": "all",
-                "mode": "all"
+                "mode": "all"  # Modalità tutte le operazioni
             })
             
             # Estrai e processa il risultato
@@ -411,7 +407,7 @@ class AgentFlow(Flow):
             print("\n" + "="*60)
             print("📊 RISULTATO TUTTE LE OPERAZIONI")
             print("="*60)
-            print(f"Numeri: a={a}, b={b}")
+            print(f"Numeri in input: a={a}, b={b}")
             print("-"*60)
             print(output)
             print("="*60)
@@ -490,8 +486,51 @@ class AgentFlow(Flow):
         print("\n" + "="*60)
         print("🏁 FLOW TERMINATO")
         print("="*60)
-        print("Grazie per aver utilizzato il sistema di orchestrazione Crew!")
-        print("="*60 + "\n")
+
+# ============================================================================
+# FUNZIONE KICKOFF (per compatibilità con crewai flow kickoff)
+# ============================================================================
+
+def kickoff():
+    """
+    Funzione kickoff richiesta dal comando 'crewai flow kickoff'.
+    Inizializza ed esegue il flow principale.
+    """
+    # Banner iniziale
+    print("\n" + "="*70)
+    print(" "*20 + "🤖 SISTEMA AGENT FLOW CON CREWAI 🤖")
+    print("="*70)
+    print("Benvenuto nel sistema di orchestrazione intelligente delle Crew!")
+    print("Questo sistema può eseguire ricerche web e operazioni matematiche.")
+    print("="*70)
+    
+    try:
+        # Inizializza e esegui il Flow
+        flow = AgentFlow()
+        print("\n" + "▶"*30)
+        result = flow.kickoff()
+        print("◀"*30)
+        
+        print("\n" + "="*50)
+        print(" "*15 + "✅ FLOW COMPLETATO")
+        print("="*50)
+        
+        return result
+        
+    except KeyboardInterrupt:
+        print("\n\n" + "="*50)
+        print(" "*10 + "⚠️  INTERRUZIONE UTENTE RILEVATA")
+        print("="*50)
+        print("Il programma è stato interrotto dall'utente.")
+        print("="*50 + "\n")
+        
+    except Exception as e:
+        print(f"\n" + "="*50)
+        print(" "*15 + "❌ ERRORE CRITICO")
+        print("="*50)
+        print(f"Si è verificato un errore imprevisto: {e}")
+        print("="*50)
+        raise
 
 # ============================================================================
 # FUNZIONE PRINCIPALE
@@ -529,7 +568,7 @@ def main():
                 print("\n" + "="*50)
                 print(" "*15 + "👋 ARRIVEDERCI!")
                 print("="*50)
-                print("Grazie per aver utilizzato il sistema Agent Flow!")
+                print("Grazie per aver utilizzato il nostro sistema!")
                 print("="*50 + "\n")
                 break
             
