@@ -76,3 +76,18 @@ Snippet: {snippet}
                 
         except Exception as e:
             return f"Errore durante la ricerca: {str(e)}"
+
+
+# Definisci il tool di somma con docstring chiara (CrewAI userà questa descrizione)
+@tool
+def add_numbers(a: int, b: int) -> int:
+    """
+    add_numbers(a: int, b: int) -> int
+    Restituisce la somma di due numeri interi passati come parametri.
+    Parametri:
+      - a: primo addendo (int)
+      - b: secondo addendo (int)
+    Ritorno:
+      - int: somma di a e b
+    """
+    return a + b

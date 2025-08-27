@@ -11,7 +11,7 @@ from typing import List, Dict, Type, Optional, Any
 #Load variables
 load_dotenv()
 
-# Configurazione Azure OpenAI LLM - PARAMETRI CORRETTI
+# Configurazione Outline dalla Ricerca
 class Section(BaseModel):
     title: str = Field(description="Title of the section")
     description: str = Field(description="Brief description of what the section should cover")
@@ -147,3 +147,4 @@ def plot():
 
 if __name__ == "__main__":
     kickoff()
+    plot()

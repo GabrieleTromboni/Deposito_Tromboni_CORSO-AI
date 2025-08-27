@@ -1,0 +1,20 @@
+compute_sum_task:
+  description: >
+    Compute the sum of two numbers: {a} and {b}
+  expected_output: >
+    The exact sum of the two numbers
+  agent: mathematician
+
+compute_diff_task:
+  description: >
+    Compute the difference between two numbers: {a} and {b}
+  expected_output: >
+    The exact difference between the two numbers
+  agent: mathematician
+
+compute_product_task:
+  description: >
+    Compute the product of two numbers: {a} and {b}
+  expected_output: >
+    The exact product of the two numbers
+  agent: mathematician
