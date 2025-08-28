@@ -15,8 +15,8 @@ from datetime import datetime
 from crewai.flow.flow import Flow, start, listen, router
 
 # Importa le Crew personalizzate dai file di configurazione
-from crews.search_crew.search_crew import SearchCrew  # Crew per ricerca web
-from crews.math_crew.math_crew import MathCrew      # Crew per operazioni matematiche
+from progetto_crew_flows.crews.search_crew.search_crew import SearchCrew  # Crew per ricerca web
+from progetto_crew_flows.crews.math_crew.math_crew import MathCrew      # Crew per operazioni matematiche
 
 # ============================================================================
 # FLOW PRINCIPALE - Orchestrazione delle Crew
@@ -601,16 +601,12 @@ def kickoff():
     
     try:
         # Inizializza e esegui il Flow
-        flow = AgentFlow()
-        print("\n" + "▶"*30)
-        result = flow.kickoff()
+        AgentFlow().kickoff()
         print("◀"*30)
-        
         print("\n" + "="*50)
         print(" "*15 + "✅ FLOW COMPLETATO")
         print("="*50)
-        
-        return result
+        plot()
         
     except KeyboardInterrupt:
         print("\n\n" + "="*50)
@@ -638,7 +634,29 @@ def plot():
     print("\n" + "="*70)
     print("📊 GENERAZIONE PLOT")
     print("="*70)
-    AgentFlow().plot(filename="agent_flow_diagram")
+
+    # Genera plot
+    flow = AgentFlow()
+    output_file = "agent_flow_diagram"
+    flow.plot(filename=output_file)
+
+    # Cerca il file generato
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    html_file = os.path.join(current_dir, f"{output_file}.html")
+    
+    if os.path.exists(html_file):
+        print(f"✅ Diagramma generato: {html_file}")
+        print(f"📂 Apri il file nel browser per visualizzarlo")
+    else:
+        # Prova nella directory corrente
+        html_file = f"{output_file}.html"
+        if os.path.exists(html_file):
+            full_path = os.path.abspath(html_file)
+            print(f"✅ Diagramma generato: {full_path}")
+            print(f"📂 Apri il file nel browser per visualizzarlo")
+        else:
+            print("⚠️ File HTML non trovato. Potrebbe essere in un'altra directory")
+    
     print("="*70)
 
 # ============================================================================
