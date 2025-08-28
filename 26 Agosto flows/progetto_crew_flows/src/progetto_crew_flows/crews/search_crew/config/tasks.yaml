@@ -1,27 +1,64 @@
 search_section_task:
   description: >
     Search for information on the topic: "{section_title}"
-    ...
+    Target audience level: {audience_level}
+    
+    Consider the audience level when searching:
+    - Beginner: Focus on basic concepts, simple explanations, and introductory materials
+    - Intermediate: Include more detailed information, some technical terms with explanations
+    - Expert: Can include advanced concepts, technical details, and specialized terminology
+    
+    Find the most relevant and credible sources that match the audience level.
+    Prioritize recent information and authoritative sources.
   expected_output: >
-    A summary of the key findings from the web search ...
+    A summary of the key findings from the web search.
   agent: web_researcher
 
 write_section_task:
   description: >
     Write a comprehensive section on the topic: "{section_title}"
-    ...
+    Target audience level: {audience_level}
+    
+    Adapt your writing style based on the audience:
+    - Beginner: Use simple language, avoid jargon, provide clear examples, explain all concepts
+    - Intermediate: Balance accessibility with depth, explain technical terms when first used
+    - Expert: Can use technical terminology freely, focus on advanced insights and nuances
+    
+    Structure the content clearly with:
+    - An engaging introduction
+    - Well-organized main points
+    - Relevant examples appropriate for the audience level
+    - A clear summary or conclusion
+    
+    Use the search results as your only primary source of information.
+    Ensure the content is accurate, informative, and engaging for the specified audience level.
   expected_output: >
-    A well-structured, comprehensive section in Markdown format ...
+    A well-structured, comprehensive section in Markdown format.
   agent: content_writer
   context:
     - search_section_task
 
 review_section_task:
   description: >
-    Review and improve the following section on "{section_title}":
-    ...
+    Review and improve the following section on "{section_title}"
+    Target audience level: {audience_level}
+    
+    Review criteria based on audience level:
+    - Beginner: Ensure absolute clarity, no unexplained terms, logical progression
+    - Intermediate: Check balance between depth and accessibility, proper term explanations
+    - Expert: Verify technical accuracy, depth of analysis, professional presentation
+    
+    Focus on:
+    1. Accuracy and completeness of information
+    2. Clarity and appropriateness for the target audience
+    3. Logical flow and organization
+    4. Grammar, spelling, and formatting
+    5. Engagement and readability
+    
+    Provide specific improvements while maintaining the original voice.
+    Use examples or analogies suitable for the audience level to enhance understanding.
   expected_output: >
-    An improved, polished version of the section ...
+    An improved, polished version of the section.
   agent: content_reviewer
   context:
     - write_section_task

@@ -8,6 +8,8 @@ delle Crew definite nei file separati.
 # Importazioni standard
 import sys
 from typing import Any, Dict
+import os
+from datetime import datetime
 
 # Importazioni CrewAI
 from crewai.flow.flow import Flow, start, listen, router
@@ -92,56 +94,124 @@ class AgentFlow(Flow):
     # ========================================================================
     
     @listen("get_search_input")
-    def get_search_query(self) -> str:
+    def make_research(self) -> str:
         """
         Raccoglie la query di ricerca dall'utente.
         Attivato quando l'utente sceglie 'ricerca'.
+        Esegue la SearchCrew con la query fornita.
+        Utilizza la Crew definita in crews/search_crew.py
         
         Returns:
-            str: Nome del prossimo step ('perform_search')
+            str: 'completed' se successo, 'error' se fallimento.
         """
+
         print("\n" + "-"*40)
         print("📝 CONFIGURAZIONE RICERCA")
         print("-"*40)
         
         # Richiesta query di ricerca
-        query = input("➜ Inserisci la tua query di ricerca: ").strip()
+        query = input("➜ Inserisci la tua query di ricerca, il topic da ricercare: ").strip()
         
         # Validazione input
         if not query:
             print("⚠️  Query vuota, uso query di default")
             query = "artificial intelligence latest news"
         
-        # Salva la query nello state
+        # Inserisci anche l'audience level
+        print("\nLivelli di audience disponibili:")
+        print("  • beginner    - Contenuto per principianti")
+        print("  • intermediate - Contenuto intermedio")
+        print("  • expert      - Contenuto avanzato")
+        
+        audience_level = input("➜ Inserisci il livello di audience (beginner/intermediate/expert): ").strip().lower()
+        
+        # Valida audience_level
+        valid_levels = ["beginner", "intermediate", "expert"]
+        if audience_level not in valid_levels:
+            print(f"⚠️ Livello audience '{audience_level}' non valido. Uso 'intermediate' come default")
+            audience_level = "intermediate"
+        
+        # Chiedi la modalità di esecuzione
+        print("\n" + "-"*40)
+        print("🔧 SELEZIONE MODALITÀ RICERCA")
+        print("-"*40)
+        print("\nModalità disponibili:")
+        print("  1 - Solo ricerca (search_only)")
+        print("  2 - Ricerca e scrittura (search_and_write)")
+        print("  3 - Pipeline completa: ricerca, scrittura e revisione (full)")
+        
+        mode_choice = input("\n➜ Scegli la modalità (1-3): ").strip()
+        
+        # Mappa la scelta alla modalità
+        mode_map = {
+            "1": "search_only",
+            "2": "search_and_write",
+            "3": "full"
+        }
+        
+        mode = mode_map.get(mode_choice, "full")
+        if mode_choice not in mode_map:
+            print("⚠️ Scelta non valida, uso modalità completa (full)")
+        
+        # Salva i parametri nello state
         self.state["query"] = query
-        print(f"✓ Query salvata: '{query}'")
+        self.state["audience_level"] = audience_level
+        self.state["search_mode"] = mode
         
-        return "perform_search"
-    
-    @listen("perform_search")
-    def execute_search(self) -> str:
-        """
-        Esegue la SearchCrew con la query fornita.
-        Utilizza la Crew definita in crews/search_crew.py
-        
-        Returns:
-            str: 'completed' se successo, 'error' se fallimento
-        """
+        print(f"\n✓ Query salvata: '{query}'")
+        print(f"✓ Livello di audience: '{audience_level}'")
+        print(f"✓ Modalità selezionata: '{mode}'")
+
         print("\n" + "-"*40)
         print("🔍 ESECUZIONE RICERCA WEB")
         print("-"*40)
-        
-        # Recupera la query dallo state
-        query = self.state.get("query", "")
         print(f"➜ Avvio SearchCrew per: '{query}'")
+        print(f"   Modalità: {mode}")
+        print(f"   Audience: {audience_level}")
         
         try:
             # Inizializza la SearchCrew
-            search_crew = SearchCrew().crew()
+            search_crew_instance = SearchCrew()
             
-            # Esegue la Crew con gli input
-            print("⏳ Ricerca in corso...")
-            result = search_crew.kickoff(inputs={"query": query})
+            # Prepara gli input per la crew
+            inputs = {
+                "query": query,
+                "section_title": query,
+                "audience_level": audience_level
+            }
+            
+            # Crea la crew con i task selezionati in base alla modalità
+            print("\n⏳ Ricerca in corso...")
+            
+            if mode == "search_only":
+                # Solo ricerca - usa direttamente la crew configurata con solo i task necessari
+                print("   Eseguirò solo la ricerca web...")
+                
+                # Ottieni gli agenti e i task necessari
+                agents = [search_crew_instance.web_researcher()]
+                tasks = [search_crew_instance.search_section_task()]
+                
+                # Verifica che siano oggetti e non dizionari
+                print(f"   DEBUG: Tipo agents[0]: {type(agents[0])}")
+                print(f"   DEBUG: Tipo tasks[0]: {type(tasks[0])}")
+                
+                # Se sono dizionari, prova ad accedere ai dati della crew configurata
+                crew_config = search_crew_instance.crew()
+                result = crew_config.kickoff(inputs=inputs)
+                
+            elif mode == "search_and_write":
+                # Ricerca e scrittura senza revisione
+                print("   Eseguirò ricerca e scrittura del contenuto...")
+                
+                # Usa la crew completa ma poi processa solo i primi due task
+                crew = search_crew_instance.crew()
+                result = crew.kickoff(inputs=inputs)
+                
+            else:  # mode == "full"
+                # Pipeline completa: usa la crew completa già configurata
+                print("   Eseguirò pipeline completa: ricerca, scrittura e revisione...")
+                crew = search_crew_instance.crew()
+                result = crew.kickoff(inputs=inputs)
             
             # Estrai e processa il risultato
             if hasattr(result, 'raw'):
@@ -154,14 +224,39 @@ class AgentFlow(Flow):
             # Salva il risultato nello state
             self.state["result"] = output
             
+            # Crea la directory outputs se non esiste
+            outputs_dir = os.path.join(os.path.dirname(__file__), "outputs", "search_results")
+            os.makedirs(outputs_dir, exist_ok=True)
+            
+            # Genera il nome del file con timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_query = query.replace(" ", "_").replace("/", "_").replace("\\", "_")[:50]  # Limita lunghezza
+            filename = f"{safe_query}_{audience_level}_{mode}_{timestamp}.md"
+            filepath = os.path.join(outputs_dir, filename)
+            
+            # Salva il contenuto nel file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"# Ricerca: {query}\n\n")
+                f.write(f"**Livello Audience:** {audience_level}\n")
+                f.write(f"**Modalità:** {mode}\n")
+                f.write(f"**Data:** {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n")
+                f.write("---\n\n")
+                f.write(output)
+            
             # Mostra il risultato
             print("\n" + "="*60)
             print("📊 RISULTATO RICERCA")
             print("="*60)
             print(f"Query: {query}")
+            print(f"Audience Level: {audience_level}")
+            print(f"Modalità: {mode}")
             print("-"*60)
             print(output)
             print("="*60)
+            
+            # Notifica del salvataggio
+            print(f"\n💾 File salvato in: {filepath}")
+            print(f"📁 Directory outputs: {outputs_dir}")
             
             return "completed"
             
@@ -533,77 +628,23 @@ def kickoff():
         raise
 
 # ============================================================================
-# FUNZIONE PRINCIPALE
+# FUNZIONE PLOT FLOW
 # ============================================================================
 
-def main():
+def plot():
     """
-    Funzione principale che gestisce il ciclo di esecuzione del Flow.
-    Permette multiple esecuzioni fino a quando l'utente decide di uscire.
+    Funzione per generare i plot dei risultati.
     """
-    # Banner iniziale
     print("\n" + "="*70)
-    print(" "*20 + "🤖 SISTEMA AGENT FLOW CON CREWAI 🤖")
+    print("📊 GENERAZIONE PLOT")
     print("="*70)
-    print("Benvenuto nel sistema di orchestrazione intelligente delle Crew!")
-    print("Questo sistema può eseguire ricerche web e operazioni matematiche.")
+    AgentFlow().plot(filename="agent_flow_diagram")
     print("="*70)
-    
-    # Inizializza il Flow una sola volta
-    flow = AgentFlow()
-    
-    # Ciclo principale di esecuzione
-    while True:
-        try:
-            # Esegui il flow
-            print("\n" + "▶"*30)
-            result = flow.kickoff()
-            print("◀"*30)
-            
-            # Chiedi se l'utente vuole continuare
-            print("\n" + "-"*50)
-            cont = input("🔄 Vuoi eseguire un'altra operazione? (s/n): ").strip().lower()
-            
-            if cont not in ("s", "si", "y", "yes", "sì"):
-                print("\n" + "="*50)
-                print(" "*15 + "👋 ARRIVEDERCI!")
-                print("="*50)
-                print("Grazie per aver utilizzato il nostro sistema!")
-                print("="*50 + "\n")
-                break
-            
-            # Reset dello state per la prossima esecuzione
-            flow.state = {}
-            print("\n✓ State resettato per nuova operazione")
-            
-        except KeyboardInterrupt:
-            # Gestione interruzione da tastiera (Ctrl+C)
-            print("\n\n" + "="*50)
-            print(" "*10 + "⚠️  INTERRUZIONE UTENTE RILEVATA")
-            print("="*50)
-            print("Il programma è stato interrotto dall'utente.")
-            print("="*50 + "\n")
-            break
-            
-        except Exception as e:
-            # Gestione errori imprevisti
-            print(f"\n" + "="*50)
-            print(" "*15 + "❌ ERRORE CRITICO")
-            print("="*50)
-            print(f"Si è verificato un errore imprevisto: {e}")
-            print("="*50)
-            
-            retry = input("\n🔄 Vuoi riprovare? (s/n): ").strip().lower()
-            if retry not in ("s", "si", "y", "yes", "sì"):
-                print("\n👋 Chiusura del programma...")
-                break
-            
-            # Reset dello state in caso di errore
-            flow.state = {}
 
 # ============================================================================
 # ENTRY POINT
 # ============================================================================
 
 if __name__ == "__main__":
-    main()
+    kickoff()
+    plot()
