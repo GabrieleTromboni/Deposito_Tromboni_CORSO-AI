@@ -1,8 +1,5 @@
-from typing import Type, Dict, Any, Union, List
-
-from crewai.tools import BaseTool
-from pydantic import BaseModel, Field
-from crewai.tools import BaseTool, tool
+from typing import Union
+from crewai.tools import tool
 
 # Math Tools
 @tool

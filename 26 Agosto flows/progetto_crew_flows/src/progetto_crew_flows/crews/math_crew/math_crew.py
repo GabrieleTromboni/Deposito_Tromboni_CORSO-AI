@@ -12,7 +12,7 @@ import os
 
 # Aggiungi il percorso tools alla path per importare i custom tools
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from tools.custom_tool import add_numbers, subtract_numbers, multiply_numbers, divide_numbers
+from tools.math_tools import add_numbers, subtract_numbers, multiply_numbers, divide_numbers
 
 @CrewBase
 class MathCrew():

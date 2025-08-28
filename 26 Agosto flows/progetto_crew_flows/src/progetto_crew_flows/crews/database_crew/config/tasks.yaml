@@ -1,0 +1,26 @@
+generation_documents_task:
+  description: >
+    Generate {topic}-related documents for various topics in the knowledge base.
+    The documents will be created using a Large Language Model (LLM) and will be stored
+    in the RAG (Retrieval-Augmented Generation) database for future retrieval.
+  expected_output: >
+    Confirmation of successful document generation in the RAG database for the specified {topic}.
+  agent: document_generator
+
+create_database_task:
+  description: >
+    Create the RAG database for storing generated documents.
+  expected_output: >
+    Confirmation of successful database creation.
+  agent: database_engineer
+
+store_documents_task:
+  description: >
+    Store generated documents in the RAG database.
+    This task will ensure that all relevant documents are saved for future retrieval.
+  expected_output: >
+    Confirmation of successful document storage in the RAG database.
+  agent: database_engineer
+  context:
+    - generation_documents_task
+    - create_database_task

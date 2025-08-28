@@ -1,78 +1,50 @@
-from typing import Type, Dict, Any, Union, List
+"""
+Custom DuckDuckGo Search Tool for CrewAI
+"""
 
-from crewai.tools import BaseTool
+from crewai_tools import BaseTool
+from typing import Type, Any
 from pydantic import BaseModel, Field
-from crewai.tools import BaseTool, tool
-try:
-    from duckduckgo_search import DDGS
-    DDGS_AVAILABLE = True
-except ImportError:
-    DDGS = None
-    DDGS_AVAILABLE = False
+from duckduckgo_search import DDGS
+import json
 
-class MyCustomToolInput(BaseModel):
-    """Input schema for MyCustomTool."""
-
-    argument: str = Field(..., description="Description of the argument.")
-
-
-class MyCustomTool(BaseTool):
-    name: str = "Name of my tool"
-    description: str = (
-        "Clear description for what this tool is useful for, your agent will need this information to use it."
-    )
-    args_schema: Type[BaseModel] = MyCustomToolInput
-
-    def _run(self, argument: str) -> str:
-        # Implementation goes here
-        return "this is an example of a tool output, ignore it and move along."
-
-# Tool personalizzato per DuckDuckGo
-class CustomDuckDuckGoSearchToolSchema(BaseModel):
-    """Schema per l'input del tool di ricerca"""
-    query: str = Field(description="La query di ricerca da eseguire su DuckDuckGo")
+class SearchInput(BaseModel):
+    """Input schema for DuckDuckGo search."""
+    query: str = Field(description="The search query to execute")
+    max_results: int = Field(default=5, description="Maximum number of results to return")
 
 class CustomDuckDuckGoSearchTool(BaseTool):
     name: str = "DuckDuckGo Search"
-    description: str = "Cerca informazioni su internet usando DuckDuckGo e restituisce i primi risultati"
-    args_schema: Type[BaseModel] = CustomDuckDuckGoSearchToolSchema
+    description: str = "Search the web using DuckDuckGo for information on any topic"
+    args_schema: Type[BaseModel] = SearchInput
     
-    def _run(self, query: str) -> str:
-        """Esegue una ricerca su DuckDuckGo e restituisce i risultati formattati"""
+    def _run(self, query: str, max_results: int = 5) -> str:
+        """
+        Execute a DuckDuckGo search and return formatted results.
         
-        # Controllo se la libreria è disponibile
-        if not DDGS_AVAILABLE:
-            return ("Errore: libreria duckduckgo-search non installata.\n"
-                    "Installa con: pip install duckduckgo-search")
-        
-        try:
-            results = []
-            with DDGS(verify=False) as ddgs:
-                # Cerca fino a 3 risultati
-                search_results = list(ddgs.text(
-                    keywords=query,  # Usa keywords invece di query per DDGS
-                    region='it-it', 
-                    safesearch='off', 
-                    max_results=3
-                ))
-                
-                for i, r in enumerate(search_results, 1):
-                    title = r.get("title", "")
-                    url = r.get("href", "") or r.get("link", "")
-                    snippet = r.get("body", "")
-                    
-                    result_text = f"""
-Risultato {i}:
-Titolo: {title}
-URL: {url}
-Snippet: {snippet}
-"""
-                    results.append(result_text)
+        Args:
+            query: The search query
+            max_results: Maximum number of results to return
             
-            if results:
-                return "\n".join(results)
-            else:
-                return f"Nessun risultato trovato per la query: {query}"
+        Returns:
+            Formatted string with search results
+        """
+        try:
+            with DDGS(verify=False) as ddgs:
+                results = list(ddgs.text(query, max_results=max_results))
+                
+                if not results:
+                    return f"No results found for query: {query}"
+                
+                formatted_results = []
+                for i, result in enumerate(results, 1):
+                    formatted_results.append(
+                        f"{i}. **{result.get('title', 'No title')}**\n"
+                        f"   URL: {result.get('href', 'No URL')}\n"
+                        f"   Summary: {result.get('body', 'No summary available')}\n"
+                    )
+                
+                return "\n".join(formatted_results)
                 
         except Exception as e:
-            return f"Errore durante la ricerca: {str(e)}"
+            return f"Error during search: {str(e)}"
