@@ -3,6 +3,11 @@ SearchCrew - Crew specializzata per la ricerca web.
 Utilizza agent researcher con tool di ricerca DuckDuckGo personalizzato.
 """
 
+"""
+SearchCrew - Crew specializzata per la ricerca web.
+Utilizza agent researcher con tool di ricerca DuckDuckGo personalizzato.
+"""
+
 from crewai import Agent, Task, Crew, Process
 from crewai.project import CrewBase, agent, crew, task
 from crewai.agents.agent_builder.base_agent import BaseAgent
@@ -12,7 +17,7 @@ import os
 
 # Aggiungi il percorso tools alla path per importare i custom tools
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from tools.custom_tool import CustomDuckDuckGoSearchTool
+from tools.search_tool import CustomDuckDuckGoSearchTool
 
 @CrewBase
 class SearchCrew():

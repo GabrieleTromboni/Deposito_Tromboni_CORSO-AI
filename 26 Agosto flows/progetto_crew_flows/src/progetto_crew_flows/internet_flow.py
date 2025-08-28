@@ -1,6 +1,6 @@
 from crewai import Agent, Crew, Task, Process
 from crewai.flow.flow import Flow, start, listen
-from tools.custom_tool import CustomDuckDuckGoSearchTool
+from tools.search_tool import CustomDuckDuckGoSearchTool
 import os
 import json
 from dotenv import load_dotenv

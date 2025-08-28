@@ -5,10 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
-import faiss
 from langchain.schema import Document
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_openai import AzureOpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import TextLoader, PDFPlumberLoader, UnstructuredMarkdownLoader
 from langchain_community.docstore.in_memory import InMemoryDocstore
