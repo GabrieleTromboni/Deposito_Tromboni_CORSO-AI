@@ -19,7 +19,7 @@ Instructions for use:
     '''
 
 from progetto_crew_flows.crews.database_crew.data_crew import DatabaseCrew
-from WebRAG_flow import WebRAGFlow
+from progetto_crew_flows.WebRAG_flow import WebRAGFlow  # Fixed import path
 
 def main():
     """Main execution function"""
@@ -111,15 +111,19 @@ def main():
             import traceback
             traceback.print_exc()
             print("Please try again with a different query.")
-    
+
+def kickoff():
+    """Entry point for crewai run command"""
     # Plot the flow diagram
     print("\nGenerating flow diagram...")
+    flow = WebRAGFlow()
     try:
-        flow.plot("query_flow_diagram")
-        print("Flow diagram saved as 'query_flow_diagram.png'")
+        flow.plot("WebRAG_flow_diagram")
+        print("Flow diagram saved as 'WebRAG_flow_diagram.png'")
     except Exception as e:
         print(f"Could not generate flow diagram: {e}")
+    main()
 
 if __name__ == "__main__":
-    main()
+    kickoff()
 

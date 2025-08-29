@@ -5,6 +5,8 @@ from langchain_openai import AzureOpenAIEmbeddings
 from langchain.chat_models import init_chat_model
 from langchain_core.prompts import ChatPromptTemplate
 from crewai.tools import tool
+from typing import List
+import json
 import os
 from pathlib import Path
 from dotenv import load_dotenv

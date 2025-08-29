@@ -6,9 +6,11 @@ Utilizza agent researcher con tool di ricerca DuckDuckGo personalizzato.
 from crewai import Agent, Task, Crew, Process
 from crewai.project import CrewBase, agent, crew, task
 from crewai.agents.agent_builder.base_agent import BaseAgent
-from typing import Dict, Any, List
+from progetto_crew_flows.models import GuideOutline
+from typing import List
 import sys
 import os
+import json
 
 # Aggiungi il percorso tools alla path per importare i custom tools
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -62,7 +64,8 @@ class SearchCrew():
     def search_section_task(self) -> Task:
         """Task per la ricerca di informazioni su un argomento specifico."""
         return Task(
-            config=self.tasks_config['search_section_task']
+            config=self.tasks_config['search_section_task'],
+            agent=self.web_researcher()
         )
     
     @task
@@ -70,6 +73,7 @@ class SearchCrew():
         """Task per scrivere una sezione completa su un argomento."""
         return Task(
             config=self.tasks_config['write_section_task'],
+            agent=self.content_writer(),
             context=[self.search_section_task()]
         )
     
@@ -78,6 +82,7 @@ class SearchCrew():
         """Task per rivedere e migliorare una sezione scritta."""
         return Task(
             config=self.tasks_config['review_section_task'],
+            agent=self.content_reviewer(),
             context=[self.write_section_task()]
         )
     
@@ -92,7 +97,7 @@ class SearchCrew():
         return Crew(
             agents=[
                 self.web_researcher(),
-                self.content_writer(), 
+                self.content_writer(),
                 self.content_reviewer()
             ],
             tasks=[
@@ -109,51 +114,22 @@ class SearchCrew():
             share_crew=False
         )
     
-    def kickoff(self, inputs: Dict[str, Any]) -> 'SearchCrewResult':
-        """
-        Execute the crew with proper input formatting.
-        
-        Args:
-            inputs: Dictionary with 'query' and 'topic' keys
-            
-        Returns:
-            SearchCrewResult object with formatted output
-        """
-        # Format inputs for tasks
+    def kickoff(self, inputs: dict):
+        """Execute the crew with proper input handling"""
         formatted_inputs = {
-            'section_title': inputs.get('topic', ''),
-            'audience_level': inputs.get('audience_level', 'general'),
-            'query': inputs.get('query', '')
+            "query": inputs.get("query", ""),
+            "topic": inputs.get("topic", ""),
+            "subject": inputs.get("subject", "general")
         }
         
-        # Execute the crew
         result = self.crew().kickoff(inputs=formatted_inputs)
         
-        # Return formatted result
-        return SearchCrewResult(
-            raw=str(result),
-            sources=self._extract_sources(result),
-            sections=self._extract_sections(result)
-        )
-    
-    def _extract_sources(self, result) -> List[str]:
-        """Extract sources from crew result."""
-        # This would parse the result to find any mentioned sources
-        # For now, return generic web sources
-        return ["DuckDuckGo Search Results", "Web Content Analysis"]
-    
-    def _extract_sections(self, result) -> List[Dict[str, str]]:
-        """Extract sections from crew result."""
-        # Parse the result to create structured sections
-        return [
-            {"title": "Search Results", "description": "Key findings from web search"},
-            {"title": "Content Analysis", "description": "Detailed analysis of found information"},
-            {"title": "Summary", "description": "Consolidated insights and conclusions"}
-        ]
-
-class SearchCrewResult:
-    """Structured result from SearchCrew execution."""
-    def __init__(self, raw: str, sources: List[str], sections: List[Dict[str, str]]):
-        self.raw = raw
-        self.sources = sources
-        self.sections = sections
+        # Parse result to ensure it's a GuideOutline
+        if isinstance(result, str):
+            try:
+                guide_data = json.loads(result)
+                return GuideOutline(**guide_data)
+            except:
+                return result
+        
+        return result

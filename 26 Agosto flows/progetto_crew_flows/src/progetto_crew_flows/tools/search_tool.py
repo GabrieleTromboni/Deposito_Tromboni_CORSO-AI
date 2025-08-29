@@ -2,11 +2,10 @@
 Custom DuckDuckGo Search Tool for CrewAI
 """
 
-from crewai_tools import BaseTool
-from typing import Type, Any
+from crewai.tools import BaseTool
+from typing import Type
 from pydantic import BaseModel, Field
 from duckduckgo_search import DDGS
-import json
 
 class SearchInput(BaseModel):
     """Input schema for DuckDuckGo search."""

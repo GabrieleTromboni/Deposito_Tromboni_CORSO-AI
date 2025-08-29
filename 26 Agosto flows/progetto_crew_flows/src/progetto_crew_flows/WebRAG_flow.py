@@ -1,14 +1,14 @@
 from crewai.flow.flow import Flow, listen, start, router, or_
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional, List, Dict
 import os
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from .models import GuideOutline, Section
-from .crews.rag_crew.rag_crew import RagCrew
-from .crews.search_crew.search_crew import SearchCrew
+from progetto_crew_flows.models import GuideOutline, Section
+from progetto_crew_flows.crews.rag_crew.rag_crew import RAGCrew
+from progetto_crew_flows.crews.search_crew.search_crew import SearchCrew
 import json
 from datetime import datetime
 
@@ -58,6 +58,7 @@ class WebRAGFlow(Flow[GuideCreatorState]):
         """Initialize LLM for topic extraction and validation"""
         return init_chat_model(
             model=CHAT_MODEL,
+            model_provider='azure_openai',
             api_version="2024-02-15-preview",
             azure_endpoint=CLIENT_AZURE,
             api_key=API_KEY,
@@ -132,7 +133,7 @@ class WebRAGFlow(Flow[GuideCreatorState]):
     @listen('use_RAG')
     def use_RAG(self, state: GuideCreatorState) -> GuideCreatorState:
         """Use RAG crew for processing"""
-        crew = RagCrew()
+        crew = RAGCrew()
         result = crew.kickoff(inputs={
             "query": state.query,
             "subject": state.subject,

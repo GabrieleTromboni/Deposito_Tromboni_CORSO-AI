@@ -10,8 +10,8 @@ from typing import List
 class RAGCrew():
     """RAG crew for information retrieval from vector database"""
     
-    agents_config = List[BaseAgent]
-    tasks_config = List[Task]
+    agents_config : List[BaseAgent]
+    tasks_config : List[Task]
         
     @agent
     def rag_retriever(self) -> Agent:
@@ -33,9 +33,9 @@ class RAGCrew():
     
     @task
     def search_rag_database(self) -> Task:
-        """Task to search the RAG database for relevant information"""
+        """Task to search the RAG database and retrieve most relevant information"""
         return Task(
-            config=self.tasks_config['search_database'],
+            config=self.tasks_config['retrieve_info_task'],
             agent=self.rag_retriever()
         )
     
@@ -43,7 +43,7 @@ class RAGCrew():
     def create_guide_from_rag(self) -> Task:
         """Task to create a comprehensive guide from retrieved information"""
         return Task(
-            config=self.tasks_config['create_guide'],
+            config=self.tasks_config['review_response_task'],
             agent=self.content_synthesizer(),
             context=[self.search_rag_database()],
             output_pydantic=GuideOutline
@@ -53,8 +53,14 @@ class RAGCrew():
     def crew(self) -> Crew:
         """Create the RAG crew"""
         return Crew(
-            agents=self.agents,
-            tasks=self.tasks,
+            agents=[
+                self.rag_retriever(),
+                self.content_synthesizer()
+            ],
+            tasks=[
+                self.search_rag_database(),
+                self.create_guide_from_rag()
+            ],
             process=Process.sequential,
             verbose=True
         )

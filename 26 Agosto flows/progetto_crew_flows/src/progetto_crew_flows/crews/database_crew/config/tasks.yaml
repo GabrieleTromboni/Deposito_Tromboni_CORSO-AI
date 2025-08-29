@@ -21,6 +21,3 @@ store_documents_task:
   expected_output: >
     Confirmation of successful document storage in the RAG database.
   agent: database_engineer
-  context:
-    - generation_documents_task
-    - create_database_task

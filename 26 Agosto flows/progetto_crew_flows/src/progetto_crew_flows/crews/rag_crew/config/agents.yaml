@@ -1,5 +1,5 @@
 database_retriever:
-  role: > 
+  role: >
     Retriever Agent for fetching relevant documents from the database.
     This agent is responsible for querying information from the RAG database to provide relevant context to the user
     utilizing advanced search techniques to retrieve and summarize information effectively.

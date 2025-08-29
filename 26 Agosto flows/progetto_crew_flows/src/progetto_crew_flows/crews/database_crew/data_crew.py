@@ -1,14 +1,25 @@
 from crewai import Agent, Task, Crew, Process
 from crewai.project import CrewBase, agent, task, crew
-from crewai.agents.agent_builder.base_agent import BaseAgent
 from typing import Dict, List
-
 import os
 import sys
 from pathlib import Path
-# Aggiungi il percorso tools alla path per importare i custom tools
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from tools.rag_tool import generate_documents, create_vectordb, store_in_vectordb
+
+# Fix the import path for tools
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+try:
+    from tools.rag_tool import generate_documents, create_vectordb, store_in_vectordb
+except ImportError as e:
+    print(f"Warning: Could not import RAG tools: {e}")
+    # Create dummy functions if tools are not available
+    def generate_documents(*args, **kwargs):
+        return "Dummy document generation"
+    def create_vectordb(*args, **kwargs):
+        return "Dummy vectordb creation"
+    def store_in_vectordb(*args, **kwargs):
+        return "Dummy storage"
 
 @CrewBase
 class DatabaseCrew():
@@ -19,13 +30,13 @@ class DatabaseCrew():
         - Tools to generate and manage documents.
     '''
     
-    agents_config : List[BaseAgent]
-    tasks_config : List[Task]
+    # Initialize config files path
+    agents_config = 'config/agents.yaml'
+    tasks_config = 'config/tasks.yaml'
 
     def __init__(self):
-
         # Ensure database directory exists
-        self.db_path = Path("rag_database")
+        self.db_path = Path("RAG_database")
         self.db_path.mkdir(exist_ok=True)
         
     @agent
@@ -34,7 +45,8 @@ class DatabaseCrew():
         return Agent(
             config=self.agents_config['document_generator'],
             tools=[generate_documents],
-            verbose=True
+            verbose=True,
+            allow_delegation=False
         )
     
     @agent
@@ -43,40 +55,83 @@ class DatabaseCrew():
         return Agent(
             config=self.agents_config['database_engineer'],
             tools=[create_vectordb, store_in_vectordb],
-            verbose=True
+            verbose=True,
+            allow_delegation=False
         )
     
     @task
     def generate_documents_task(self) -> Task:
         return Task(
-            config=self.tasks_config['generate_documents_task']
+            config=self.tasks_config['generation_documents_task'],
+            agent=self.document_generator()
         )
     
     @task
     def create_rag_database_task(self) -> Task:
         return Task(
-            config=self.tasks_config['create_database_task']
+            config=self.tasks_config['create_database_task'],
+            agent=self.database_engineer()
         )
 
     @task
     def store_documents_task(self) -> Task:
         return Task(
             config=self.tasks_config['store_documents_task'],
+            agent=self.database_engineer(),
             context=[
-                self.generate_documents_task,
-                self.create_rag_database_task
+                self.generate_documents_task(),
+                self.create_rag_database_task()
             ]
         )
     
     @crew
     def crew(self) -> Crew:
+        """Create the database crew"""
         return Crew(
-            agents=[self.document_generator, self.database_engineer],
-            tasks=[self.generate_documents_task, self.create_rag_database_task, self.store_documents_task],
+            agents=[
+                self.document_generator(),
+                self.database_engineer()
+            ],
+            tasks=[
+                self.generate_documents_task(),
+                self.create_rag_database_task(),
+                self.store_documents_task()
+            ],
             process=Process.sequential,
             verbose=True
         )
-
-    def kickoff(self, subjects: Dict[str, List[str]]) -> bool:
-        '''Start the crew process for database initialization.'''
-        return self.crew.kickoff(subjects)
+    
+    def kickoff(self, subjects: Dict[str, List[str]] = None):
+        """Initialize database with all subjects and topics"""
+        if subjects is None:
+            subjects = {}
+            
+        # Flatten all topics from subjects
+        all_topics = []
+        for subject, topics in subjects.items():
+            for topic in topics:
+                all_topics.append(f"{subject} - {topic}")
+        
+        # Provide a default topic if none given
+        if not all_topics:
+            all_topics = ["General Knowledge"]
+        
+        # Run the crew with proper input format - ensure topics is a list
+        inputs = {
+            "topic": ", ".join(all_topics),
+            "topics": all_topics,  # Pass as list for generate_documents tool
+            "subjects": subjects,
+            "db_name": str(self.db_path)  # Add database path
+        }
+        
+        try:
+            result = self.crew().kickoff(inputs=inputs)
+            return result
+        except Exception as e:
+            print(f"Error during crew execution: {e}")
+            # Return a default result structure
+            return {
+                "status": "error",
+                "message": str(e),
+                "topics_processed": all_topics
+            }
