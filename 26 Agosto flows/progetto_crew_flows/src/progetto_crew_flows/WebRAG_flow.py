@@ -18,7 +18,8 @@ load_dotenv()
 API_KEY = os.getenv("AZURE_API_KEY")
 CLIENT_AZURE = os.getenv("AZURE_API_BASE")
 API_VERSION = os.getenv("AZURE_API_VERSION")
-MODEL = os.getenv("MODEL")
+# Support both CHAT_MODEL and legacy MODEL env vars for chat deployment
+CHAT_MODEL = os.getenv("CHAT_MODEL") or os.getenv("MODEL")
 
 # Define our flow state
 class GuideCreatorState(BaseModel):
@@ -39,14 +40,13 @@ class WebRAGFlow(Flow[GuideCreatorState]):
     # Predefined subjects and topics available in RAG
     SUBJECTS = {
         'medicine': [
-            "cardiology", "neurology", "oncology", "pediatrics", 
-            "dermatology", "orthopedics", "psychiatry"
+            "cardiology", "neurology", "psychiatry"
         ],
         'football': [
-            "premier league", "la liga", "bundesliga", "serie a"
+            "premier league", "serie a"
         ],
         'technology': [
-            "artificial intelligence", "machine learning", "blockchain", "cloud computing"
+            "artificial intelligence", "blockchain"
         ]
     }
 
@@ -57,7 +57,7 @@ class WebRAGFlow(Flow[GuideCreatorState]):
     def _init_llm(self):
         """Initialize LLM for topic extraction and validation"""
         return AzureChatOpenAI(
-            deployment_name=MODEL,
+            deployment_name=CHAT_MODEL,
             openai_api_version=API_VERSION,
             azure_endpoint=CLIENT_AZURE,
             openai_api_key=API_KEY,

@@ -1,23 +1,30 @@
 generation_documents_task:
   description: >
-    Generate {topic}-related documents for various topics in the knowledge base.
-    The documents will be created using a Large Language Model (LLM) and will be stored
-    in the RAG (Retrieval-Augmented Generation) database for future retrieval.
+    Generate exactly {docs_per_topic} documents ONCE for each topic in the knowledge base: {topic}.
+    Use the generate_documents tool with topics={topics}, docs_per_topic={docs_per_topic}, max_tokens_per_doc={max_tokens_per_doc}, batch_size={batch_size}.
+    DO NOT repeat document generation for the same topics.
+    The documents will be created using a Large Language Model (LLM) with different perspectives
+    to provide comprehensive coverage.
   expected_output: >
-    Confirmation of successful document generation in the RAG database for the specified {topic}.
+    List of generated documents with confirmation that exactly {docs_per_topic} documents per topic have been created for all {topics} topics.
+    Return the generated documents list directly from the generate_documents tool.
   agent: document_generator
 
 create_database_task:
   description: >
-    Create the RAG database for storing generated documents.
+    Create the RAG database ONCE for storing generated documents using the create_vectordb tool.
+    DO NOT repeat database creation if it already exists.
   expected_output: >
-    Confirmation of successful database creation.
+    Confirmation message from create_vectordb tool that the database has been successfully created.
   agent: database_engineer
 
 store_documents_task:
   description: >
-    Store generated documents in the RAG database.
-    This task will ensure that all relevant documents are saved for future retrieval.
+    Store the generated documents from generation_documents_task in the RAG database using the store_in_vectordb tool.
+    Take the exact output from the document generation task and pass it as the 'content' parameter to store_in_vectordb.
+    The content should be the JSON list of documents returned by the generate_documents tool.
+    Call store_in_vectordb with the content parameter set to the complete documents list.
+    DO NOT repeat storage for the same documents.
   expected_output: >
-    Confirmation of successful document storage in the RAG database.
+    Confirmation message from store_in_vectordb tool that all documents have been successfully stored in the RAG database with chunk count and topic information.
   agent: database_engineer

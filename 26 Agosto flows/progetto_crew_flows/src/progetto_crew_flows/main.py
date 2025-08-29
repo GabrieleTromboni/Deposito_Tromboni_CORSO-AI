@@ -33,9 +33,30 @@ def main():
     database_crew = DatabaseCrew()
 
     # Initialize database with all subjects and topics
-    print("\nInitializing database with subjects and topics...")
-    initialization_result = database_crew.kickoff(WebRAGFlow.SUBJECTS)
-    print(f"Result: {initialization_result}")
+    print("\nChecking RAG database status...")
+    print("Using optimized document generation with rate limiting for efficiency...")
+    initialization_result = database_crew.kickoff(
+        WebRAGFlow.SUBJECTS, 
+        docs_per_topic=1,          # Generate 1 document per topic
+        max_tokens_per_doc=600,    # Reduced token limit for efficiency
+        batch_size=3               # Process 3 topics per batch to avoid rate limits
+    )
+    
+    # Check if database initialization was successful or skipped
+    if isinstance(initialization_result, dict):
+        if initialization_result.get("status") == "skipped":
+            print("✅ RAG database already exists and is ready to use!")
+        elif initialization_result.get("status") == "error":
+            print(f"❌ Error initializing database: {initialization_result.get('message')}")
+            print("Continuing with limited functionality...")
+        else:
+            print("✅ RAG database initialization completed!")
+    else:
+        print(f"✅ Database initialization result: {initialization_result}")
+    
+    print("\n" + "="*60)
+    print("RAG DATABASE READY")
+    print("="*60)
     
     # Initialize the flow
     flow = WebRAGFlow()

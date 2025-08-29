@@ -104,10 +104,28 @@ class DatabaseCrew():
             verbose=True
         )
     
-    def kickoff(self, subjects: Dict[str, List[str]] = None):
-        """Initialize database with all subjects and topics"""
+    def kickoff(self, subjects: Dict[str, List[str]] = None, docs_per_topic: int = 1, max_tokens_per_doc: int = 800, batch_size: int = 3):
+        """Initialize database with all subjects and topics with optimized document generation and rate limiting
+        
+        Args:
+            subjects: Dictionary of subjects with their topics
+            docs_per_topic: Number of documents to generate per topic (default: 1)
+            max_tokens_per_doc: Maximum tokens per document for efficiency (default: 800)
+            batch_size: Number of topics to process in each batch to avoid rate limits (default: 3)
+        """
         if subjects is None:
             subjects = {}
+        
+        # Check if database already exists and has content
+        db_index_path = self.db_path / "index.faiss"
+        if db_index_path.exists():
+            print(f"⚠️ RAG database already exists at {self.db_path}")
+            print(f"   Skipping database initialization to avoid duplicates.")
+            return {
+                "status": "skipped",
+                "message": "Database already exists",
+                "db_path": str(self.db_path)
+            }
             
         # Flatten all topics from subjects
         all_topics = []
@@ -119,19 +137,38 @@ class DatabaseCrew():
         if not all_topics:
             all_topics = ["General Knowledge"]
         
+        total_batches = (len(all_topics) + batch_size - 1) // batch_size
+        estimated_time = total_batches * 2.5  # Rough estimate including delays
+        
+        print(f"🚀 Optimized Document Generation Strategy:")
+        print(f"   • {docs_per_topic} documents per topic")
+        print(f"   • Max {max_tokens_per_doc} tokens per document")
+        print(f"   • {len(all_topics)} topics in {total_batches} batches of {batch_size}")
+        print(f"   • Expected ~{len(all_topics) * docs_per_topic * max_tokens_per_doc:,} total tokens")
+        print(f"   • Estimated time: ~{estimated_time:.0f}s with rate limiting")
+        print(f"   • Diverse content strategies for better RAG performance")
+        
         # Run the crew with proper input format - ensure topics is a list
         inputs = {
             "topic": ", ".join(all_topics),
             "topics": all_topics,  # Pass as list for generate_documents tool
+            "docs_per_topic": docs_per_topic,  # Add docs_per_topic parameter
+            "max_tokens_per_doc": max_tokens_per_doc,  # Add token limit parameter
+            "batch_size": batch_size,  # Add batch size for rate limiting
             "subjects": subjects,
-            "db_name": str(self.db_path)  # Add database path
+            "db_name": str(self.db_path),  # Add database path
+            "total_topics": len(all_topics)  # Add total count for validation
         }
         
         try:
+            print(f"\n🔄 Starting database crew execution...")
             result = self.crew().kickoff(inputs=inputs)
+            print(f"✅ Database crew execution completed!")
             return result
         except Exception as e:
-            print(f"Error during crew execution: {e}")
+            print(f"❌ Error during crew execution: {e}")
+            import traceback
+            traceback.print_exc()
             # Return a default result structure
             return {
                 "status": "error",

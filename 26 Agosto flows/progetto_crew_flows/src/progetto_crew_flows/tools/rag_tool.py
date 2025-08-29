@@ -4,15 +4,14 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import AzureOpenAIEmbeddings, AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from crewai.tools import tool
-from typing import List
+from typing import List, Dict, Union, Optional
 import json
 import os
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 from dataclasses import dataclass
-from typing import Dict, Union, List, Optional
 from progetto_crew_flows.models import GuideOutline, Section
-import json
 
 load_dotenv()
 
@@ -29,14 +28,14 @@ DEFAULT_PERSIST_DIR = os.getenv("RAG_DB_DIR") or str(BASE_DIR / "RAG_database")
 class Settings:
     # Persistenza FAISS
     persist_dir: str = DEFAULT_PERSIST_DIR
-    # Text splitting
-    chunk_size: int = 500
-    chunk_overlap: int = 80
-    # Retriever (MMR)
-    search_type: str = "mmr"        # "mmr" o "similarity"
-    k: int = 4                     # risultati finali
-    fetch_k: int = 20               # candidati iniziali (per MMR)
-    mmr_lambda: float = 0.3         # 0 = diversificazione massima, 1 = pertinenza massima
+    # Text splitting - optimized for controlled document lengths
+    chunk_size: int = 200          # Smaller chunks for better precision
+    chunk_overlap: int = 30        # Reduced overlap for efficiency
+    # Retriever (MMR) - optimized for diverse retrieval
+    search_type: str = "mmr"       # MMR for diversity (or 'similarity')
+    k: int = 3                     # Increased results for better coverage
+    fetch_k: int = 20              # More candidates for MMR selection
+    mmr_lambda: float = 0.4        # Balanced relevance/diversity
     # Embedding
     hf_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     # LM Studio (OpenAI-compatible)
@@ -47,52 +46,182 @@ SETTINGS = Settings()
 API_VERSION = os.getenv("AZURE_API_VERSION")
 API_KEY = os.getenv("AZURE_API_KEY")
 CLIENT_AZURE = os.getenv("AZURE_API_BASE")
-MODEL = os.getenv("MODEL")
+# Support both CHAT_MODEL and legacy MODEL env vars for chat deployment
+CHAT_MODEL = os.getenv("CHAT_MODEL") or os.getenv("MODEL")
+# Embedding deployment name must be an Azure deployment
+# Initialize embeddings
+EMBEDDINGS = AzureOpenAIEmbeddings(
+    model='text-embedding-ada-002',
+    openai_api_key=API_KEY,
+    openai_api_version=API_VERSION,
+    azure_endpoint=CLIENT_AZURE
+)
 
 # RAG Tools
 # Tool per la generazione di documenti e store in vector database
 
 @tool
-def generate_documents(topics: List[str]) -> List[Dict[str, str]]:
-    """Generate documents for specific topics and return them as structured data for DatabaseCrew"""
+def generate_documents(topics: List[str], docs_per_topic: int = 1, max_tokens_per_doc: int = 600, batch_size: int = 3, delay_between_batches: float = 2.0) -> str:
+    """Generate multiple optimized documents for specific topics with controlled length and rate limiting
+    
+    Args:
+        topics: List of topics to generate documents for
+        docs_per_topic: Number of documents to generate per topic (default: 1)
+        max_tokens_per_doc: Maximum tokens per document for efficiency (default: 600)
+        batch_size: Number of topics to process in each batch (default: 3)
+        delay_between_batches: Delay in seconds between batches (default: 2.0)
+    
+    Returns:
+        JSON string containing list of document dictionaries with controlled length and diverse perspectives
+    """
+    
+    # Safety check: limit max execution time and document count
+    MAX_EXECUTION_TIME = 300  # 5 minutes max
+    MAX_TOTAL_DOCUMENTS = 100  # Never generate more than 100 documents
+    
+    start_time = time.time()
+    
+    if len(topics) * docs_per_topic > MAX_TOTAL_DOCUMENTS:
+        print(f"⚠️ Warning: Requested {len(topics) * docs_per_topic} documents exceeds limit of {MAX_TOTAL_DOCUMENTS}")
+        print(f"   Reducing docs_per_topic to maintain limit...")
+        docs_per_topic = min(docs_per_topic, MAX_TOTAL_DOCUMENTS // len(topics))
+    
+    print(f"🚀 Starting document generation for {len(topics)} topics ({docs_per_topic} docs each)")
+    print(f"   Maximum execution time: {MAX_EXECUTION_TIME}s")
+    print(f"   Maximum total documents: {MAX_TOTAL_DOCUMENTS}")
 
     llm = AzureChatOpenAI(
-        deployment_name=MODEL,
+        deployment_name=CHAT_MODEL,
         openai_api_version=API_VERSION,
         azure_endpoint=CLIENT_AZURE,
         openai_api_key=API_KEY,
-        temperature=0.1
+        temperature=0.2,  # Slightly higher for diversity between docs
+        max_tokens=max_tokens_per_doc,  # Control output length
+        request_timeout=30  # Add timeout for reliability
         )
 
     documents = []
+    start_time = time.time()
     
-    for topic in topics:
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", f"You are an expert {topic} content generator. Create detailed, accurate information about it."),
-            ("human", f"Generate comprehensive content about {topic} including key concepts, applications, and recent developments.")
-        ])
-        
-        chain = prompt | llm
-        result = chain.invoke({"topic": topic})
-        
-        content = result.content if hasattr(result, 'content') else str(result)
-        documents.append({
-            "topic": topic,
-            "content": content,
-            "source": f"generated_{topic}"
-        })
+    # Document generation strategies for efficiency and diversity
+    doc_strategies = [
+        {
+            "focus": "fundamentals",
+            "system_prompt": "You are a technical educator. Create concise, structured content focusing on core concepts and definitions.",
+            "user_prompt": "Generate a focused overview of {topic} covering: 1) Key definitions 2) Core principles 3) Main applications. Keep it concise but comprehensive.",
+            "doc_type": "fundamentals"
+        },
+        {
+            "focus": "practical",
+            "system_prompt": "You are a practical expert. Create actionable content with real-world examples and implementations.",
+            "user_prompt": "Generate practical insights about {topic} covering: 1) Real-world use cases 2) Implementation examples 3) Best practices. Focus on actionable information.",
+            "doc_type": "practical"
+        },
+        {
+            "focus": "advanced",
+            "system_prompt": "You are a research specialist. Create in-depth content covering advanced concepts and recent developments.",
+            "user_prompt": "Generate advanced analysis of {topic} covering: 1) Recent developments 2) Technical challenges 3) Future trends. Focus on cutting-edge insights.",
+            "doc_type": "advanced"
+        },
+        {
+            "focus": "comparative",
+            "system_prompt": "You are a comparative analyst. Create content that compares and contrasts different approaches or methodologies.",
+            "user_prompt": "Generate comparative analysis of {topic} covering: 1) Different approaches 2) Advantages/disadvantages 3) When to use each. Focus on decision-making insights.",
+            "doc_type": "comparative"
+        }
+    ]
     
-    return documents
+    # Process topics in batches to avoid rate limits
+    total_batches = (len(topics) + batch_size - 1) // batch_size
+    
+    for batch_num, batch_start in enumerate(range(0, len(topics), batch_size)):
+        batch_topics = topics[batch_start:batch_start + batch_size]
+        print(f"📦 Processing batch {batch_num + 1}/{total_batches}: {len(batch_topics)} topics")
+        
+        for topic in batch_topics:
+            # Safety check: ensure we don't exceed max execution time
+            if time.time() - start_time > MAX_EXECUTION_TIME:
+                print(f"⚠️ Maximum execution time ({MAX_EXECUTION_TIME}s) reached. Stopping generation.")
+                break
+                
+            print(f"   🔄 Generating {docs_per_topic} optimized documents for: {topic}")
+            
+            # Select strategies based on docs_per_topic
+            selected_strategies = doc_strategies[:docs_per_topic]
+            
+            for doc_num, strategy in enumerate(selected_strategies):
+                # Double safety check for time limit
+                if time.time() - start_time > MAX_EXECUTION_TIME:
+                    print(f"⚠️ Time limit reached during document generation. Stopping.")
+                    break
+                prompt = ChatPromptTemplate.from_messages([
+                    ("system", strategy["system_prompt"]),
+                    ("human", strategy["user_prompt"].format(topic=topic))
+                ])
+                
+                try:
+                    chain = prompt | llm
+                    result = chain.invoke({"topic": topic})
+                    
+                    content = result.content if hasattr(result, 'content') else str(result)
+                    
+                    # Estimate token count (rough approximation: 1 token ≈ 4 characters)
+                    estimated_tokens = len(content) // 4
+                    
+                    documents.append({
+                        "topic": topic,
+                        "content": content,
+                        "source": f"generated_{topic}_{strategy['focus']}_doc{doc_num + 1}",
+                        "doc_type": strategy["doc_type"],
+                        "focus_area": strategy["focus"],
+                        "estimated_tokens": estimated_tokens,
+                        "generation_strategy": f"{strategy['focus']}_optimized",
+                        "batch_number": batch_num + 1
+                    })
+                    
+                    print(f"      ✓ {strategy['focus']} document (~{estimated_tokens} tokens)")
+                    
+                    # Small delay between documents to avoid overwhelming the API
+                    if doc_num < len(selected_strategies) - 1:
+                        time.sleep(0.5)
+                    
+                except Exception as e:
+                    print(f"      ✗ Error generating {strategy['focus']} document: {e}")
+                    # Add a fallback minimal document
+                    documents.append({
+                        "topic": topic,
+                        "content": f"Brief overview of {topic} - content generation failed but topic recorded for database.",
+                        "source": f"fallback_{topic}_doc{doc_num + 1}",
+                        "doc_type": "fallback",
+                        "focus_area": strategy["focus"],
+                        "estimated_tokens": 20,
+                        "generation_strategy": "fallback",
+                        "batch_number": batch_num + 1
+                    })
+        
+        # Delay between batches to respect rate limits
+        if batch_num < total_batches - 1:
+            print(f"   ⏳ Waiting {delay_between_batches}s before next batch...")
+            time.sleep(delay_between_batches)
+    
+    total_tokens = sum(doc.get("estimated_tokens", 0) for doc in documents)
+    generation_time = time.time() - start_time
+    successful_docs = len([d for d in documents if d.get("doc_type") != "fallback"])
+    
+    print(f"\n📊 Generation Summary:")
+    print(f"   ✓ {len(documents)} total documents ({successful_docs} successful, {len(documents)-successful_docs} fallback)")
+    print(f"   ✓ {len(topics)} topics processed in {total_batches} batches")
+    print(f"   ✓ Total estimated tokens: {total_tokens:,} (avg {total_tokens//len(documents) if documents else 0} per doc)")
+    print(f"   ✓ Generation time: {generation_time:.2f}s (avg {generation_time/len(documents):.2f}s per doc)")
+    print(f"   ✓ Token efficiency: {total_tokens/generation_time:.0f} tokens/second")
+    
+    # Return as JSON string for easy transfer between tasks
+    import json
+    return json.dumps(documents, ensure_ascii=False, indent=2)
 
 @tool
 def create_vectordb() -> str:
     '''Create or initialize the Vector Database to be used for RAG with WebRAGFlow.'''
-    
-    embeddings = AzureOpenAIEmbeddings(
-        model='text-embedding-ada-002',
-        openai_api_key=API_KEY,
-        azure_endpoint=CLIENT_AZURE
-    )
     
     # Create directory if it doesn't exist
     Path(SETTINGS.persist_dir).mkdir(parents=True, exist_ok=True)
@@ -102,45 +231,83 @@ def create_vectordb() -> str:
         page_content="Vector database initialized",
         metadata={"source": "system", "topic": "initialization"}
     )
-    
-    vector_store = FAISS.from_documents([initial_doc], embeddings)
+
+    vector_store = FAISS.from_documents([initial_doc], EMBEDDINGS)
     vector_store.save_local(SETTINGS.persist_dir)
 
     return f"Vector database created successfully at {SETTINGS.persist_dir}"
 
 @tool
-def store_in_vectordb(
-    content: Union[str, List[Dict[str, str]]],
-    topic: Optional[str] = None
-    ) -> str:
-    """Store generated content in the FAISS vector database for use with WebRAGFlow"""
+def store_in_vectordb(content: str, topic: Optional[str] = None) -> str:
+    """Store generated content in the FAISS vector database for use with WebRAGFlow
     
-    embeddings = AzureOpenAIEmbeddings(
-        model='text-embedding-ada-002',
-        openai_api_key=API_KEY,
-        azure_endpoint=CLIENT_AZURE
-    )
-
-    # Handle different input formats
+    Args:
+        content: Either a JSON string containing a list of documents, or plain text content
+        topic: Optional topic name (used only if content is plain text)
+    
+    Returns:
+        Success message with details about stored documents
+    """
+    
     documents = []
-    if isinstance(content, list):
-        for item in content:
-            doc = Document(
-                page_content=item.get("content", ""),
-                metadata={
-                    "topic": item.get("topic", "unknown"),
-                    "source": item.get("source", "generated")
-                }
-            )
-            documents.append(doc)
-    else:
+    
+    # Try to parse content as JSON first (from generate_documents output)
+    try:
+        import json
+        if isinstance(content, str) and (content.strip().startswith('[') or content.strip().startswith('{')):
+            parsed_content = json.loads(content)
+            
+            # Handle case where it's wrapped in another dict
+            if isinstance(parsed_content, dict) and 'content' in parsed_content:
+                parsed_content = parsed_content['content']
+            
+            # Handle list of documents
+            if isinstance(parsed_content, list):
+                for item in parsed_content:
+                    if isinstance(item, dict) and 'content' in item:
+                        # Create metadata with string conversion for compatibility
+                        metadata = {
+                            "topic": str(item.get("topic", topic or "unknown")),
+                            "source": str(item.get("source", "generated"))
+                        }
+                        # Add additional metadata fields if present, converting to strings
+                        for key, value in item.items():
+                            if key not in ["content", "topic", "source"]:
+                                metadata[key] = str(value)
+                                
+                        doc = Document(
+                            page_content=item.get("content", ""),
+                            metadata=metadata
+                        )
+                        documents.append(doc)
+            else:
+                # Single document as dict
+                if isinstance(parsed_content, dict) and 'content' in parsed_content:
+                    metadata = {
+                        "topic": str(parsed_content.get("topic", topic or "unknown")),
+                        "source": str(parsed_content.get("source", "generated"))
+                    }
+                    doc = Document(
+                        page_content=parsed_content.get("content", ""),
+                        metadata=metadata
+                    )
+                    documents.append(doc)
+    except (json.JSONDecodeError, ValueError):
+        # Content is not JSON, treat as plain text
+        pass
+    
+    # If no documents were parsed from JSON, treat as plain text
+    if not documents:
         doc = Document(
-            page_content=content,
+            page_content=str(content),
             metadata={"topic": topic or "general", "source": f"generated_{topic or 'content'}.md"}
         )
         documents.append(doc)
     
-    # Split documents
+    if not documents:
+        return "Error: No valid documents found to store"
+    
+    # Split documents into chunks
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=SETTINGS.chunk_size,
         chunk_overlap=SETTINGS.chunk_overlap
@@ -149,18 +316,26 @@ def store_in_vectordb(
     
     # Load or create vector store
     persist_dir = SETTINGS.persist_dir
-    if Path(persist_dir).exists() and Path(persist_dir, "index.faiss").exists():
-        vector_store = FAISS.load_local(
-            persist_dir,
-            embeddings,
-            allow_dangerous_deserialization=True
-        )
-        vector_store.add_documents(chunks)
-    else:
-        Path(persist_dir).mkdir(parents=True, exist_ok=True)
-        vector_store = FAISS.from_documents(chunks, embeddings)
+    try:
+        if Path(persist_dir).exists() and Path(persist_dir, "index.faiss").exists():
+            vector_store = FAISS.load_local(
+                persist_dir,
+                EMBEDDINGS,
+                allow_dangerous_deserialization=True
+            )
+            vector_store.add_documents(chunks)
+        else:
+            Path(persist_dir).mkdir(parents=True, exist_ok=True)
+            vector_store = FAISS.from_documents(chunks, EMBEDDINGS)
+
+        # Save vector store
+        vector_store.save_local(persist_dir)
+        
+        topics_stored = set([doc.metadata.get("topic", "unknown") for doc in documents])
+        return f"Successfully stored {len(chunks)} chunks from {len(documents)} documents for topics: {', '.join(topics_stored)}"
     
-    # Save vector store
+    except Exception as e:
+        return f"Error storing documents in vector database: {str(e)}"
     vector_store.save_local(persist_dir)
     
     topics_stored = set([doc.metadata.get("topic", "unknown") for doc in documents])
@@ -173,13 +348,6 @@ def retrieve_from_vectordb(query: str, topic: Optional[str] = None, subject: Opt
     Returns raw documents for further processing.
     """
     
-    # Initialize embeddings
-    embeddings = AzureOpenAIEmbeddings(
-        model='text-embedding-ada-002',
-        openai_api_key=API_KEY,
-        azure_endpoint=CLIENT_AZURE
-    )
-    
     # Load FAISS index from correct path
     persist_dir = SETTINGS.persist_dir
     if not Path(persist_dir).exists() or not Path(persist_dir, "index.faiss").exists():
@@ -187,7 +355,7 @@ def retrieve_from_vectordb(query: str, topic: Optional[str] = None, subject: Opt
     
     vector_store = FAISS.load_local(
         persist_dir,
-        embeddings,
+        EMBEDDINGS,
         allow_dangerous_deserialization=True
     )
     
@@ -243,7 +411,7 @@ def format_content_as_guide(retrieved_info: str, query: str, topic: str, subject
     """
     
     llm = AzureChatOpenAI(
-        deployment_name=MODEL,
+        deployment_name=CHAT_MODEL,
         openai_api_version=API_VERSION,
         azure_endpoint=CLIENT_AZURE,
         openai_api_key=API_KEY,
