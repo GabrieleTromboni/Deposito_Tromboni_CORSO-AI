@@ -19,7 +19,7 @@ Instructions for use:
     '''
 
 from progetto_crew_flows.crews.database_crew.data_crew import DatabaseCrew
-from progetto_crew_flows.WebRAG_flow import WebRAGFlow  # Fixed import path
+from progetto_crew_flows.WebRAG_flow import WebRAGFlow 
 
 def main():
     """Main execution function"""

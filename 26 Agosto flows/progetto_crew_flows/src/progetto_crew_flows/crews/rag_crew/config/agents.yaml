@@ -12,7 +12,7 @@ database_retriever:
     The retriever agent was developed to address the growing need for efficient document retrieval in complex databases.
     With the increasing volume of data, traditional search methods were no longer sufficient.
     The retriever agent combines advanced AI techniques with domain expertise to provide users with the most relevant documents quickly and accurately.
-  llm: 'azure/text-embedding-ada-002'
+  llm: azure/text-embedding-ada-002
 
 content_reviewer:
   role: >

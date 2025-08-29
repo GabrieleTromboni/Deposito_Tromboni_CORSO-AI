@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict
 import os
 from dotenv import load_dotenv
-from langchain.chat_models import init_chat_model
+from langchain_openai import AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from progetto_crew_flows.models import GuideOutline, Section
@@ -17,8 +17,8 @@ load_dotenv()
 # Define models for structured data
 API_KEY = os.getenv("AZURE_API_KEY")
 CLIENT_AZURE = os.getenv("AZURE_API_BASE")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
-CHAT_MODEL = os.getenv("CHAT_MODEL")
+API_VERSION = os.getenv("AZURE_API_VERSION")
+MODEL = os.getenv("MODEL")
 
 # Define our flow state
 class GuideCreatorState(BaseModel):
@@ -56,12 +56,11 @@ class WebRAGFlow(Flow[GuideCreatorState]):
         
     def _init_llm(self):
         """Initialize LLM for topic extraction and validation"""
-        return init_chat_model(
-            model=CHAT_MODEL,
-            model_provider='azure_openai',
-            api_version="2024-02-15-preview",
+        return AzureChatOpenAI(
+            deployment_name=MODEL,
+            openai_api_version=API_VERSION,
             azure_endpoint=CLIENT_AZURE,
-            api_key=API_KEY,
+            openai_api_key=API_KEY,
             temperature=0.1
         )
     

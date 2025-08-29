@@ -1,12 +1,14 @@
 retrieve_info_task:
-  description: "Retrieve relevant information from the database about {topic} based on the query: {query}, searching in the RAG database.
-    Informations MUST be accurate and well-cited and MUST coming ONLY from the RAG Vector Database."
-  expected_output: "Relevant documents and citations exclusively coming from the RAG Vector Database"
+  description: > 
+    Retrieve relevant information from the database about {topic} based on the query: {query}, searching in the RAG database.
+    Informations MUST be accurate and well-cited and MUST coming ONLY from the RAG Vector Database.
+  expected_output: >
+   Relevant documents and citations exclusively coming from the RAG Vector Database
   agent: database_retriever
 
 review_response_task:
-  description: "Create a comprehensive {topic}-related response based on retrieved information about {topic}. Ensure all claims are supported by the retrieved documents."
-  expected_output: "A detailed {topic}-related response with proper citations in GuideOutline format"
+  description: >
+    Create a comprehensive {topic}-related response based on retrieved information about {topic}. Ensure all claims are supported by the retrieved documents.
+  expected_output: >
+    A detailed {topic}-related response with proper citations in GuideOutline format
   agent: content_reviewer
-  context:
-    - retrieve_info_task

@@ -1,8 +1,7 @@
 from langchain.schema import Document
 from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import AzureOpenAIEmbeddings
-from langchain.chat_models import init_chat_model
+from langchain_openai import AzureOpenAIEmbeddings, AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from crewai.tools import tool
 from typing import List
@@ -17,10 +16,19 @@ import json
 
 load_dotenv()
 
+"""
+Ensure FAISS persistence directory is stable regardless of the current working directory.
+We compute the project directory as 3 levels above this file: src/progetto_crew_flows/tools/ -> project root
+Resulting path: <project_root>/RAG_database
+Optionally overridden via RAG_DB_DIR environment variable.
+"""
+BASE_DIR = Path(__file__).resolve().parents[3]
+DEFAULT_PERSIST_DIR = os.getenv("RAG_DB_DIR") or str(BASE_DIR / "RAG_database")
+
 @dataclass
 class Settings:
     # Persistenza FAISS
-    persist_dir: str = "26 Agosto flows/progetto_crew_flows/RAG_database"
+    persist_dir: str = DEFAULT_PERSIST_DIR
     # Text splitting
     chunk_size: int = 500
     chunk_overlap: int = 80
@@ -36,10 +44,10 @@ class Settings:
 
 
 SETTINGS = Settings()
+API_VERSION = os.getenv("AZURE_API_VERSION")
 API_KEY = os.getenv("AZURE_API_KEY")
 CLIENT_AZURE = os.getenv("AZURE_API_BASE")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
-CHAT_MODEL = os.getenv("CHAT_MODEL")
+MODEL = os.getenv("MODEL")
 
 # RAG Tools
 # Tool per la generazione di documenti e store in vector database
@@ -48,12 +56,11 @@ CHAT_MODEL = os.getenv("CHAT_MODEL")
 def generate_documents(topics: List[str]) -> List[Dict[str, str]]:
     """Generate documents for specific topics and return them as structured data for DatabaseCrew"""
 
-    llm = init_chat_model(
-        model=CHAT_MODEL,
-        model_provider="azure_openai",
-        api_version="2024-02-15-preview",
+    llm = AzureChatOpenAI(
+        deployment_name=MODEL,
+        openai_api_version=API_VERSION,
         azure_endpoint=CLIENT_AZURE,
-        api_key=API_KEY,
+        openai_api_key=API_KEY,
         temperature=0.1
         )
 
@@ -82,11 +89,9 @@ def create_vectordb() -> str:
     '''Create or initialize the Vector Database to be used for RAG with WebRAGFlow.'''
     
     embeddings = AzureOpenAIEmbeddings(
-        model_provider="azure_openai",
-        api_key=API_KEY,
-        azure_endpoint=CLIENT_AZURE,
-        deployment=EMBEDDING_MODEL,
-        api_version="2024-02-15-preview"
+        model='text-embedding-ada-002',
+        openai_api_key=API_KEY,
+        azure_endpoint=CLIENT_AZURE
     )
     
     # Create directory if it doesn't exist
@@ -111,13 +116,11 @@ def store_in_vectordb(
     """Store generated content in the FAISS vector database for use with WebRAGFlow"""
     
     embeddings = AzureOpenAIEmbeddings(
-        model_provider="azure_openai",
-        api_key=API_KEY,
-        azure_endpoint=CLIENT_AZURE,
-        deployment=EMBEDDING_MODEL,
-        api_version="2024-02-15-preview"
+        model='text-embedding-ada-002',
+        openai_api_key=API_KEY,
+        azure_endpoint=CLIENT_AZURE
     )
-    
+
     # Handle different input formats
     documents = []
     if isinstance(content, list):
@@ -172,11 +175,9 @@ def retrieve_from_vectordb(query: str, topic: Optional[str] = None, subject: Opt
     
     # Initialize embeddings
     embeddings = AzureOpenAIEmbeddings(
-        model_provider="azure_openai",
-        api_key=API_KEY,
-        azure_endpoint=CLIENT_AZURE,
-        deployment=EMBEDDING_MODEL,
-        api_version="2024-02-15-preview"
+        model='text-embedding-ada-002',
+        openai_api_key=API_KEY,
+        azure_endpoint=CLIENT_AZURE
     )
     
     # Load FAISS index from correct path
@@ -241,12 +242,11 @@ def format_content_as_guide(retrieved_info: str, query: str, topic: str, subject
     Returns a JSON string that can be parsed into GuideOutline.
     """
     
-    llm = init_chat_model(
-        model=CHAT_MODEL,
-        model_provider="azure_openai",
-        api_version="2024-02-15-preview",
+    llm = AzureChatOpenAI(
+        deployment_name=MODEL,
+        openai_api_version=API_VERSION,
         azure_endpoint=CLIENT_AZURE,
-        api_key=API_KEY,
+        openai_api_key=API_KEY,
         temperature=0.3
     )
     

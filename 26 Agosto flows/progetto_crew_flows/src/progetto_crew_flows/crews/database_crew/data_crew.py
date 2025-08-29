@@ -4,6 +4,7 @@ from typing import Dict, List
 import os
 import sys
 from pathlib import Path
+import os
 
 # Fix the import path for tools
 project_root = Path(__file__).parent.parent.parent
@@ -35,9 +36,11 @@ class DatabaseCrew():
     tasks_config = 'config/tasks.yaml'
 
     def __init__(self):
-        # Ensure database directory exists
-        self.db_path = Path("RAG_database")
-        self.db_path.mkdir(exist_ok=True)
+        # Ensure database directory exists, independent from CWD
+        project_root = Path(__file__).resolve().parents[3]
+        db_dir = os.getenv("RAG_DB_DIR") or str(project_root / "RAG_database")
+        self.db_path = Path(db_dir)
+        self.db_path.mkdir(parents=True, exist_ok=True)
         
     @agent
     def document_generator(self) -> Agent:
