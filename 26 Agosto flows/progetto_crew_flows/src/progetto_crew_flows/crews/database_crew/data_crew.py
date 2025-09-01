@@ -10,16 +10,24 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 try:
-    from tools.rag_tool import generate_documents, create_vectordb, store_in_vectordb
+    from tools.rag_tool import generate_documents_as_files, create_vectordb, store_individual_documents
 except ImportError as e:
-    print(f"Warning: Could not import RAG tools: {e}")
-    # Create dummy functions if tools are not available
-    def generate_documents(*args, **kwargs):
-        return "Dummy document generation"
-    def create_vectordb(*args, **kwargs):
-        return "Dummy vectordb creation"
-    def store_in_vectordb(*args, **kwargs):
-        return "Dummy storage"
+    print(f"Warning: Could not import RAG tools v2: {e}")
+    # Try fallback to original tools
+    try:
+        from tools.rag_tool import generate_documents, create_vectordb, store_in_vectordb
+        # Create aliases for compatibility
+        generate_documents_as_files = generate_documents
+        store_individual_documents = store_in_vectordb
+    except ImportError as e2:
+        print(f"Warning: Could not import any RAG tools: {e2}")
+        # Create dummy functions if tools are not available
+        def generate_documents_as_files(*args, **kwargs):
+            return "Dummy document generation"
+        def create_vectordb(*args, **kwargs):
+            return "Dummy vectordb creation"
+        def store_individual_documents(*args, **kwargs):
+            return "Dummy storage"
 
 @CrewBase
 class DatabaseCrew():
@@ -43,10 +51,10 @@ class DatabaseCrew():
         
     @agent
     def document_generator(self) -> Agent:
-        '''Agent to generate domain-related documents.'''
+        '''Agent to generate domain-related documents as individual files.'''
         return Agent(
             config=self.agents_config['document_generator'],
-            tools=[generate_documents],
+            tools=[generate_documents_as_files],
             verbose=True,
             allow_delegation=False
         )
@@ -56,7 +64,7 @@ class DatabaseCrew():
         '''Agent to manage the vector database.'''
         return Agent(
             config=self.agents_config['database_engineer'],
-            tools=[create_vectordb, store_in_vectordb],
+            tools=[create_vectordb, store_individual_documents],
             verbose=True,
             allow_delegation=False
         )

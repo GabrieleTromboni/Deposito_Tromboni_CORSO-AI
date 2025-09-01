@@ -1,0 +1,18 @@
+{
+  "id": "71a13d02-052e-466c-81a7-398a442aa8e1",
+  "subject": "technology",
+  "topic": "artificial intelligence",
+  "full_topic": "technology - artificial intelligence",
+  "doc_type": "comprehensive_overview",
+  "doc_index": 0,
+  "content": "# Comprehensive Guide to Artificial Intelligence (AI)\n\nArtificial Intelligence (AI) is one of the most transformative technologies of the 21st century. It has revolutionized industries, reshaped economies, and redefined how humans interact with machines. This guide provides a detailed overview of AI, covering its key concepts, history, current status, and future potential.\n\n---\n\n## 1. **Key Definitions and Concepts**\n\n### What is Artificial Intelligence?\nArtificial Intelligence (AI) refers to the simulation of human intelligence in machines that are programmed to think, reason, learn, and make decisions. AI systems can perform tasks typically requiring human intelligence, such as problem-solving, natural language understanding, and visual perception.\n\n### Key Concepts in AI:\n- **Machine Learning (ML):** A subset of AI that enables machines to learn from data and improve their performance over time without being explicitly programmed. Example: Recommendation systems on Netflix or Amazon.\n- **Deep Learning:** A subset of ML that uses neural networks with multiple layers (hence \"deep\") to analyze complex data. Example: Image recognition in self-driving cars.\n- **Natural Language Processing (NLP):** The ability of machines to understand, interpret, and respond to human language. Example: ChatGPT, Google Translate.\n- **Computer Vision:** The ability of AI systems to interpret and process visual data from the world. Example: Facial recognition systems.\n- **Reinforcement Learning:** A type of ML where agents learn by interacting with their environment and receiving rewards or penalties. Example: AlphaGo, which learned to play the board game Go.\n\n---\n\n## 2. **Historical Background and Development**\n\n### Early Foundations:\n- **1943:** Warren McCulloch and Walter Pitts proposed the first mathematical model of a neural network.\n- **1950:** Alan Turing introduced the \"Turing Test\" to evaluate a machine's ability to exhibit intelligent behavior indistinguishable from that of a human.\n- **1956:** The term \"Artificial Intelligence\" was coined at the Dartmouth Conference, marking the birth of AI as a field of study.\n\n### Key Milestones:\n- **1960s-1970s:** Development of early AI programs like ELIZA (a chatbot) and SHRDLU (a natural language understanding program).\n- **1980s:** Introduction of expert systems, which used rule-based reasoning to solve complex problems in specific domains.\n- **1997:** IBM's Deep Blue defeated world chess champion Garry Kasparov, showcasing AI's potential in strategic games.\n- **2011:** IBM Watson won the quiz show *Jeopardy!*, demonstrating advanced NLP and knowledge retrieval.\n- **2016:** DeepMind's AlphaGo defeated the world champion Go player, a significant milestone in reinforcement learning.\n\n---\n\n## 3. **Current Status and Trends**\n\n### Current State of AI:\nAI is now integrated into everyday life, powering technologies like virtual assistants (e.g., Siri, Alexa), autonomous vehicles, and personalized recommendations.",
+  "estimated_tokens": 556.4,
+  "generated_at": "2025-09-01T16:56:18.153516",
+  "strategy": "comprehensive_overview",
+  "metadata": {
+    "subject": "technology",
+    "topic": "artificial intelligence",
+    "doc_type": "comprehensive_overview",
+    "source": "ai_generated"
+  }
+}

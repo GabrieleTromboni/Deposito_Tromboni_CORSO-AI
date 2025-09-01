@@ -34,6 +34,8 @@ class GuideCreatorState(BaseModel):
     confidence_score: float = 0.0
     is_valid_subject: bool = False  # Added validation flag
     is_valid_topic: bool = False    # Added validation flag
+    found_subjects: List[str] = []  # Additional found subjects
+    found_topics: List[str] = []    # Additional found topics
 
 class WebRAGFlow(Flow[GuideCreatorState]):
     
@@ -53,6 +55,14 @@ class WebRAGFlow(Flow[GuideCreatorState]):
     def __init__(self):
         super().__init__()
         self.llm = self._init_llm()
+        self.query_input = None  # Store query input here
+        
+    def kickoff(self, inputs=None, **kwargs):
+        """Override kickoff to capture inputs before starting flow"""
+        if inputs and isinstance(inputs, dict):
+            self.query_input = inputs.get('query')
+        print(f"🔧 WebRAGFlow kickoff called with query: {self.query_input}")
+        return super().kickoff(inputs=inputs, **kwargs)
         
     def _init_llm(self):
         """Initialize LLM for topic extraction and validation"""
@@ -65,51 +75,108 @@ class WebRAGFlow(Flow[GuideCreatorState]):
         )
     
     @start()
-    def extraction(self, query: str = None) -> GuideCreatorState:
+    def extraction(self) -> GuideCreatorState:
         """First step: Extract subject and topic from user query"""
         
-        # Handle different input formats
+        # Use the query stored during kickoff
+        query = self.query_input
+        
         if query is None:
-            raise ValueError("No query provided to the flow. Please provide a query parameter.")
+            # Try backup methods to get the query
+            inputs = getattr(self, '_inputs', {})
+            print(f"🔍 Flow inputs: {inputs}")
+            
+            if isinstance(inputs, dict):
+                query = inputs.get('query')
+        
+        if query is None:
+            raise ValueError(f"No query provided to the flow. Query input: {self.query_input}")
         
         print(f"🔍 Extracting from query: {query}")
         print(f"🔍 Query type: {type(query)}")
         print(f"🔍 Query length: {len(str(query))}")
         
-        # Ensure we have a valid string query
-        query_str = str(query).strip()
-        if not query_str:
-            raise ValueError("Empty query provided to the flow")
+        print(f"🔍 Processing query: {query}")
         
-        print(f"🔍 Processing query: {query_str}")
+        # Check if any subjects or topics from SUBJECTS are present in the query
+        query_lower = query.lower()
+        found_subjects = []
+        found_topics = []
         
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert at extracting subjects and topics from queries.
-            Available subjects are: {subjects}
-            Extract both the main subject category and the specific topic from the user's question.
-            Return in format: subject|topic
-            If you can't identify a clear subject from the available ones, return: general|topic"""),
-            ("human", "Query: {query}\n\nExtract subject and topic (format: subject|topic):")
-        ])
+        print(f"🔍 Searching for subjects and topics in query...")
         
-        chain = prompt | self.llm | StrOutputParser()
-        extracted = chain.invoke({
-            "query": query_str,
-            "subjects": ", ".join(self.SUBJECTS.keys())
-        })
+        # Search for subjects in the query
+        for subject in self.SUBJECTS.keys():
+            if subject.lower() in query_lower:
+                found_subjects.append(subject)
+                print(f"   ✓ Found subject: {subject}")
         
-        # Parse the extraction
-        parts = extracted.strip().lower().split('|')
-        subject = parts[0] if len(parts) > 0 else "general"
-        topic = parts[1] if len(parts) > 1 else parts[0]
+        # Search for topics in the query
+        for subject, topics in self.SUBJECTS.items():
+            for topic in topics:
+                if topic.lower() in query_lower:
+                    found_topics.append(topic)
+                    found_subjects.append(subject)  # Also add the parent subject
+                    print(f"   ✓ Found topic: {topic} (subject: {subject})")
         
-        # Initialize GuideCreatorState
+        # Remove duplicates
+        found_subjects = list(set(found_subjects))
+        found_topics = list(set(found_topics))
+        
+        print(f"🔍 Summary - Found subjects: {found_subjects}, Found topics: {found_topics}")
+        
+        # Determine primary subject and topic for processing
+        if found_subjects:
+            # Use the first found subject
+            primary_subject = found_subjects[0]
+            print(f"🔍 Primary subject: {primary_subject}")
+        else:
+            # Fallback to LLM extraction if no direct matches
+            print(f"🔍 No direct subject matches found, using LLM extraction...")
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are an expert at extracting subjects and topics from queries.
+                Available subjects are: {subjects}
+                Extract the main subject category from the user's question.
+                Return only the subject name, or 'general' if no clear match."""),
+                ("human", "Query: {query}\n\nExtract subject:")
+            ])
+            
+            chain = prompt | self.llm | StrOutputParser()
+            primary_subject = chain.invoke({
+                "query": query,
+                "subjects": ", ".join(self.SUBJECTS.keys())
+            }).strip().lower()
+        
+        # Determine primary topic
+        if found_topics:
+            # Use the first found topic
+            primary_topic = found_topics[0]
+            print(f"🔍 Primary topic: {primary_topic}")
+        else:
+            # Fallback to LLM extraction
+            print(f"🔍 No direct topic matches found, using LLM extraction...")
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are an expert at extracting topics from queries.
+                Extract the main topic or focus from the user's question.
+                Return a concise topic description."""),
+                ("human", "Query: {query}\n\nExtract main topic:")
+            ])
+            
+            chain = prompt | self.llm | StrOutputParser()
+            primary_topic = chain.invoke({"query": query}).strip().lower()
+        
+        # Initialize GuideCreatorState with additional metadata
         state = GuideCreatorState(
-            query=query_str,
-            subject=subject,
-            topic=topic,
-            audience_level="general"  # Default audience level
+            query=query,
+            subject=primary_subject,
+            topic=primary_topic,
+            audience_level="general",  # Default audience level
+            found_subjects=found_subjects if found_subjects else [],
+            found_topics=found_topics if found_topics else []
         )
+        
+        print(f"🔍 State created - Subject: {state.subject}, Topic: {state.topic}")
+        print(f"🔍 Additional found items - Subjects: {state.found_subjects}, Topics: {state.found_topics}")
         
         return state
     
@@ -117,14 +184,54 @@ class WebRAGFlow(Flow[GuideCreatorState]):
     def validation(self, state: GuideCreatorState) -> GuideCreatorState:
         """Second step: Validate if subject and topic are in allowed list"""
         
-        # Check if subject is valid
-        state.is_valid_subject = state.subject in self.SUBJECTS
+        print(f"🔍 Validation - Primary subject: {state.subject}, Primary topic: {state.topic}")
+        print(f"🔍 Validation - Found subjects: {state.found_subjects}, Found topics: {state.found_topics}")
         
-        # Check if topic is valid for the subject
+        # Check if primary subject is valid
+        state.is_valid_subject = state.subject in self.SUBJECTS.keys()
+        
+        # Check if primary topic is valid for the subject
         if state.is_valid_subject:
             state.is_valid_topic = state.topic in self.SUBJECTS[state.subject]
         else:
             state.is_valid_topic = False
+        
+        # Enhanced validation: if we found ANY subjects/topics in the query, consider it valid for RAG
+        has_rag_content = False
+        
+        # Check if any found subjects are valid
+        for found_subject in state.found_subjects:
+            if found_subject in self.SUBJECTS.keys():
+                has_rag_content = True
+                print(f"✓ Found valid subject in query: {found_subject}")
+                break
+        
+        # Check if any found topics are valid
+        if not has_rag_content:
+            for found_topic in state.found_topics:
+                for subject, topics in self.SUBJECTS.items():
+                    if found_topic in topics:
+                        has_rag_content = True
+                        print(f"✓ Found valid topic in query: {found_topic} (subject: {subject})")
+                        # Update primary subject if we found a valid topic
+                        if not state.is_valid_subject:
+                            state.subject = subject
+                            state.is_valid_subject = True
+                        if not state.is_valid_topic:
+                            state.topic = found_topic
+                            state.is_valid_topic = True
+                        break
+                if has_rag_content:
+                    break
+        
+        # Override validation if we found RAG content
+        if has_rag_content:
+            print(f"🔍 RAG content detected in query - using RAG route")
+            state.is_valid_subject = True
+            state.is_valid_topic = True
+        
+        print(f"🔍 Final validation - Subject valid: {state.is_valid_subject}, Topic valid: {state.is_valid_topic}")
+        print(f"🔍 Final state - Subject: {state.subject}, Topic: {state.topic}")
         
         # Set confidence score and audience level based on validation
         if state.is_valid_subject and state.is_valid_topic:

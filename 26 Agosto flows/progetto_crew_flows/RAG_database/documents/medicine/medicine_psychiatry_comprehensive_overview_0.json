@@ -1,0 +1,18 @@
+{
+  "id": "88d0c711-8461-4c7c-ab90-7d848669be77",
+  "subject": "medicine",
+  "topic": "psychiatry",
+  "full_topic": "medicine - psychiatry",
+  "doc_type": "comprehensive_overview",
+  "doc_index": 0,
+  "content": "# Comprehensive Guide to Psychiatry\n\nPsychiatry is a branch of medicine focused on the diagnosis, treatment, and prevention of mental, emotional, and behavioral disorders. It is a multidisciplinary field that integrates biology, psychology, and social sciences to address mental health issues.\n\n---\n\n## 1. **Key Definitions and Concepts**\n\n### **Psychiatry**\nPsychiatry is the medical specialty dedicated to the study, diagnosis, treatment, and prevention of mental illnesses. Psychiatrists are medical doctors (MDs or DOs) who specialize in mental health and are qualified to prescribe medication, conduct psychotherapy, and recommend other treatments.\n\n### **Mental Disorders**\nMental disorders are conditions that affect mood, thinking, and behavior. Common examples include depression, anxiety disorders, schizophrenia, bipolar disorder, and post-traumatic stress disorder (PTSD).\n\n### **Psychotherapy**\nPsychotherapy, or talk therapy, is a treatment method used to help individuals manage mental health conditions through communication with a trained therapist. Examples include cognitive-behavioral therapy (CBT), psychodynamic therapy, and dialectical behavior therapy (DBT).\n\n### **Psychopharmacology**\nPsychopharmacology is the study of how medications affect mental health. Psychiatrists often prescribe medications such as antidepressants, antipsychotics, mood stabilizers, and anxiolytics to treat mental disorders.\n\n### **Neurotransmitters**\nNeurotransmitters are chemical messengers in the brain that play a key role in mood regulation and mental health. Examples include serotonin, dopamine, and norepinephrine.\n\n---\n\n## 2. **Historical Background and Development**\n\n### **Ancient Roots**\n- Mental health treatment dates back to ancient civilizations. In Ancient Greece, Hippocrates proposed that mental illness was caused by imbalances in bodily humors.\n- Early treatments included herbal remedies, exorcisms, and trepanation (drilling holes in the skull).\n\n### **Middle Ages**\n- Mental illness was often attributed to supernatural causes, such as possession by demons. Treatments were largely punitive, including imprisonment and torture.\n\n### **The Enlightenment**\n- In the 18th century, mental illness began to be viewed as a medical condition. Philippe Pinel in France advocated for humane treatment of patients in asylums, marking the beginning of modern psychiatry.\n\n### **19th Century**\n- The establishment of psychiatric hospitals and asylums became widespread. Emil Kraepelin introduced the concept of classifying mental disorders, laying the foundation for modern diagnostic systems.\n\n### **20th Century**\n- Sigmund Freud developed psychoanalysis, emphasizing the role of unconscious processes in mental health.\n- The discovery of psychotropic medications, such as chlorpromazine (Thorazine) in the 1950s, revolutionized treatment.\n- The deinstitutionalization movement in the 1960s shifted care from asylums to community-based settings.\n\n---\n\n## 3. **Current Status and Trends**\n\n### **Global Mental Health Crisis**\n-",
+  "estimated_tokens": 525.2,
+  "generated_at": "2025-09-01T16:55:55.613013",
+  "strategy": "comprehensive_overview",
+  "metadata": {
+    "subject": "medicine",
+    "topic": "psychiatry",
+    "doc_type": "comprehensive_overview",
+    "source": "ai_generated"
+  }
+}

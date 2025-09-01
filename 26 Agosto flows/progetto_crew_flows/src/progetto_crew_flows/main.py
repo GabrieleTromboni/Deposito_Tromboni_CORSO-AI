@@ -24,46 +24,49 @@ from progetto_crew_flows.WebRAG_flow import WebRAGFlow
 def main():
     """Main execution function"""
     
-    # First step: Create/Update RAG database
+    # Optional: Check/Initialize RAG database
     print("\n" + "="*60)
-    print("INITIALIZING RAG DATABASE")
+    print("CHECKING RAG DATABASE STATUS")
     print("="*60)
 
-    # Initialize DatabaseCrew to create database with all subjects
-    database_crew = DatabaseCrew()
-
-    # Initialize database with all subjects and topics
-    print("\nChecking RAG database status...")
-    print("Using optimized document generation with rate limiting for efficiency...")
-    initialization_result = database_crew.kickoff(
-        WebRAGFlow.SUBJECTS, 
-        docs_per_topic=1,          # Generate 1 document per topic
-        max_tokens_per_doc=600,    # Reduced token limit for efficiency
-        batch_size=3               # Process 3 topics per batch to avoid rate limits
-    )
+    # Check if database exists first
+    import os
+    database_path = "RAG_database"
+    database_exists = os.path.exists(database_path) and os.path.exists(os.path.join(database_path, "index.faiss"))
     
-    # Check if database initialization was successful or skipped
-    if isinstance(initialization_result, dict):
-        if initialization_result.get("status") == "skipped":
-            print("✅ RAG database already exists and is ready to use!")
-        elif initialization_result.get("status") == "error":
-            print(f"❌ Error initializing database: {initialization_result.get('message')}")
-            print("Continuing with limited functionality...")
-        else:
-            print("✅ RAG database initialization completed!")
+    if database_exists:
+        print("✅ RAG database already exists and is ready to use!")
+        print("   Skipping database initialization...")
     else:
-        print(f"✅ Database initialization result: {initialization_result}")
+        print("\n🔄 RAG database not found. Initializing...")
+        # Initialize DatabaseCrew to create database with all subjects
+        database_crew = DatabaseCrew()
+
+        print("Using optimized document generation with rate limiting for efficiency...")
+        initialization_result = database_crew.kickoff(
+            WebRAGFlow.SUBJECTS, 
+            docs_per_topic=1,          # Generate 1 document per topic
+            max_tokens_per_doc=600,    # Reduced token limit for efficiency
+            batch_size=3               # Process 3 topics per batch to avoid rate limits
+        )
+        
+        # Check if database initialization was successful
+        if isinstance(initialization_result, dict):
+            if initialization_result.get("status") == "error":
+                print(f"❌ Error initializing database: {initialization_result.get('message')}")
+                print("Continuing with limited functionality (web search only)...")
+            else:
+                print("✅ RAG database initialization completed!")
+        else:
+            print(f"✅ Database initialization result: {initialization_result}")
     
     print("\n" + "="*60)
-    print("RAG DATABASE READY")
+    print("STARTING INFORMATION QUERY SYSTEM")
     print("="*60)
     
     # Initialize the flow
     flow = WebRAGFlow()
     
-    print("\n" + "="*60)
-    print("INFORMATION QUERY SYSTEM")
-    print("="*60)
     print("\nAvailable subjects and topics:")
     for subject, topics in WebRAGFlow.SUBJECTS.items():
         print(f"\n{subject.upper()}:")
@@ -78,22 +81,27 @@ def main():
     
     while True:
         # Get user input
-        query = input("\nEnter your query (or 'exit' to quit): ").strip()
+        query = input("\nEnter your query (or 'exit' to quit): ")
+
+        # Ensure we have a valid string query
+        query_str = str(query).strip()
+        if not query_str:
+            raise ValueError("Empty query provided to the flow")
         
-        if query.lower() == 'exit':
+        if query_str.lower() == 'exit':
             print("\nGoodbye!")
             break
         
-        if not query:
+        if not query_str:
             print("Please enter a valid query.")
             continue
         
         try:
             # Process the query
-            print(f"\nProcessing query: '{query}'")
+            print(f"\nProcessing query: '{query_str}'")
             print("-" * 40)
             
-            result = flow.kickoff(inputs={"query": query})
+            result = flow.kickoff(inputs={"query": query_str})
             
             # Display processing details
             print(f"\nExtracted Subject: {result.subject}")

@@ -3011,16 +3011,28 @@ name = "progetto-crew-flows"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "certifi" },
     { name = "crewai", extra = ["tools"] },
     { name = "duckduckgo-search" },
     { name = "faiss-cpu" },
+    { name = "httpx" },
+    { name = "langchain-community" },
+    { name = "langchain-openai" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi", specifier = ">=2024.0.0" },
     { name = "crewai", extras = ["tools"], specifier = ">=0.165.1,<1.0.0" },
     { name = "duckduckgo-search", specifier = ">=6.2.0" },
     { name = "faiss-cpu", specifier = ">=1.12.0" },
+    { name = "httpx", specifier = ">=0.25.0" },
+    { name = "langchain-community", specifier = ">=0.2.0" },
+    { name = "langchain-openai", specifier = ">=0.1.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
 
 [[package]]

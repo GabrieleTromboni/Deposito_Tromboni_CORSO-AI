@@ -1,14 +1,35 @@
 retrieve_info_task:
   description: > 
-    Retrieve relevant information from the database about {topic} based on the query: {query}, searching in the RAG database.
-    Informations MUST be accurate and well-cited and MUST coming ONLY from the RAG Vector Database.
+    Use the retrieve_from_vectordb tool to search for information about "{topic}" based on the query: "{query}".
+    
+    Call the tool with these exact parameters:
+    - query: "{query}"
+    - topic: "{topic}"
+    - subject: "{subject}"
+    
+    The tool will return structured text with documents from the RAG database.
+    
+    IMPORTANT: Simply return the tool output as your task result. Do not modify, summarize, or interpret it.
+    The next agent will handle the formatting.
   expected_output: >
-   Relevant documents and citations exclusively coming from the RAG Vector Database
+    The exact structured text output from the retrieve_from_vectordb tool containing all retrieved documents.
+    Return this output without any modifications or additional commentary.
   agent: database_retriever
 
 review_response_task:
   description: >
-    Create a comprehensive {topic}-related response based on retrieved information about {topic}. Ensure all claims are supported by the retrieved documents.
+    Take the retrieved information from the previous task and use the format_content_as_guide tool to create a comprehensive guide.
+    
+    Use the context from the previous task which contains structured document data from the RAG database.
+    The previous task output is automatically available as context.
+    
+    Call the format_content_as_guide tool with:
+    - retrieved_info: Use the output from the previous retrieval task
+    - query: "{query}"
+    - topic: "{topic}" 
+    - subject: "{subject}"
+    
+    IMPORTANT: Return only the clean JSON output from the tool. Remove any markdown formatting like ```json.
   expected_output: >
-    A detailed {topic}-related response with proper citations in GuideOutline format
+    Clean JSON string representing a GuideOutline object without any markdown formatting or extra characters.
   agent: content_reviewer

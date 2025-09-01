@@ -1,0 +1,40 @@
+{
+  "query": "Spiegami i principi della cardiology",
+  "subject": "medicine",
+  "topic": "cardiology",
+  "audience_level": "professional",
+  "guide_outline": {
+    "title": "Medicine Guide: Cardiology",
+    "introduction": "Information about cardiology in medicine",
+    "target_audience": "Professionals in medicine",
+    "sections": [
+      {
+        "title": "Overview",
+        "description": "General overview of the topic"
+      },
+      {
+        "title": "Key Points",
+        "description": "Main points to understand"
+      },
+      {
+        "title": "Additional Information",
+        "description": "Further details and resources"
+      }
+    ],
+    "conclusion": "Information retrieved from knowledge base."
+  },
+  "sections_content": {},
+  "source_type": "RAG",
+  "sources": [
+    "RAG Database - medicine/cardiology"
+  ],
+  "confidence_score": 0.95,
+  "is_valid_subject": true,
+  "is_valid_topic": true,
+  "found_subjects": [
+    "medicine"
+  ],
+  "found_topics": [
+    "cardiology"
+  ]
+}

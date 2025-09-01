@@ -1,232 +1,328 @@
+import json
+import time
+import os
 from langchain.schema import Document
 from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import AzureOpenAIEmbeddings, AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from crewai.tools import tool
-from typing import List, Dict, Union, Optional
-import json
-import os
-import time
+from typing import List, Optional, Union
 from pathlib import Path
 from dotenv import load_dotenv
 from dataclasses import dataclass
 from progetto_crew_flows.models import GuideOutline, Section
+import uuid
+from datetime import datetime
+
+# Import SSL configuration
+try:
+    from .ssl_config import configure_azure_openai_ssl
+    configure_azure_openai_ssl()
+except ImportError:
+    print("⚠️ SSL configuration not available")
 
 load_dotenv()
 
-"""
-Ensure FAISS persistence directory is stable regardless of the current working directory.
-We compute the project directory as 3 levels above this file: src/progetto_crew_flows/tools/ -> project root
-Resulting path: <project_root>/RAG_database
-Optionally overridden via RAG_DB_DIR environment variable.
-"""
+# Configuration
 BASE_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_PERSIST_DIR = os.getenv("RAG_DB_DIR") or str(BASE_DIR / "RAG_database")
 
 @dataclass
 class Settings:
-    # Persistenza FAISS
     persist_dir: str = DEFAULT_PERSIST_DIR
-    # Text splitting - optimized for controlled document lengths
-    chunk_size: int = 200          # Smaller chunks for better precision
-    chunk_overlap: int = 30        # Reduced overlap for efficiency
-    # Retriever (MMR) - optimized for diverse retrieval
-    search_type: str = "mmr"       # MMR for diversity (or 'similarity')
-    k: int = 3                     # Increased results for better coverage
-    fetch_k: int = 20              # More candidates for MMR selection
-    mmr_lambda: float = 0.4        # Balanced relevance/diversity
-    # Embedding
-    hf_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
-    # LM Studio (OpenAI-compatible)
-    lmstudio_model_env: str = "LMSTUDIO_MODEL"  # nome del modello in LM Studio, via env var
-
+    chunk_size: int = 800  # Increased for richer content (was 300)
+    chunk_overlap: int = 100  # Increased proportionally (was 50)
+    search_type: str = "mmr"
+    k: int = 3
+    fetch_k: int = 10
+    mmr_lambda: float = 0.4
 
 SETTINGS = Settings()
+
+# Azure OpenAI configuration
 API_VERSION = os.getenv("AZURE_API_VERSION")
 API_KEY = os.getenv("AZURE_API_KEY")
 CLIENT_AZURE = os.getenv("AZURE_API_BASE")
-# Support both CHAT_MODEL and legacy MODEL env vars for chat deployment
 CHAT_MODEL = os.getenv("CHAT_MODEL") or os.getenv("MODEL")
-# Embedding deployment name must be an Azure deployment
-# Initialize embeddings
-EMBEDDINGS = AzureOpenAIEmbeddings(
-    model='text-embedding-ada-002',
-    openai_api_key=API_KEY,
-    openai_api_version=API_VERSION,
-    azure_endpoint=CLIENT_AZURE
-)
 
-# RAG Tools
-# Tool per la generazione di documenti e store in vector database
+# Initialize embeddings with error handling
+try:
+    EMBEDDINGS = AzureOpenAIEmbeddings(
+        model='text-embedding-ada-002',
+        openai_api_key=API_KEY,
+        openai_api_version=API_VERSION,
+        azure_endpoint=CLIENT_AZURE
+    )
+    print("✅ Azure OpenAI embeddings initialized successfully")
+except Exception as e:
+    print(f"⚠️ Warning: Azure OpenAI embeddings initialization failed: {e}")
+    EMBEDDINGS = None
 
+def safe_embeddings_check():
+    """Check if embeddings are available and working"""
+    if EMBEDDINGS is None:
+        return False
+    try:
+        # Try a simple embedding to test connectivity
+        test_result = EMBEDDINGS.embed_query("test")
+        return len(test_result) > 0
+    except Exception as e:
+        print(f"⚠️ Embeddings test failed: {e}")
+        return False
+
+def parse_topic_info(topic_str: str):
+    """Parse topic string to extract subject and specific topic"""
+    if " - " in topic_str:
+        parts = topic_str.split(" - ", 1)
+        return parts[0].strip(), parts[1].strip()
+    return "general", topic_str.strip()
+
+def create_document_filename(subject: str, topic: str, doc_type: str, doc_index: int):
+    """Create a standardized filename for document JSON files"""
+    # Clean up strings for filename
+    safe_subject = "".join(c for c in subject if c.isalnum() or c in (' ', '-', '_')).strip()
+    safe_topic = "".join(c for c in topic if c.isalnum() or c in (' ', '-', '_')).strip()
+    safe_doc_type = "".join(c for c in doc_type if c.isalnum() or c in (' ', '-', '_')).strip()
+    
+    # Replace spaces with underscores
+    safe_subject = safe_subject.replace(' ', '_')
+    safe_topic = safe_topic.replace(' ', '_')
+    safe_doc_type = safe_doc_type.replace(' ', '_')
+    
+    return f"{safe_subject}_{safe_topic}_{safe_doc_type}_{doc_index}.json"
+
+def normalize_input(value):
+    """Normalize input from CrewAI agents that might wrap strings in dict format"""
+    if value is None:
+        return None
+    
+    if isinstance(value, str):
+        return value
+    
+    if isinstance(value, dict):
+        # Handle specific case for retrieved_info from RAG tool
+        if 'content' in value and isinstance(value['content'], str):
+            return value['content']
+            
+        # Handle CrewAI wrapped inputs like {'description': 'actual_value', 'type': 'str'}
+        if 'description' in value and isinstance(value['description'], str):
+            return value['description']
+        
+        # Handle simple wrapped string values like {'type': 'str', 'value': 'content'}
+        if 'value' in value and isinstance(value['value'], str):
+            return value['value']
+        
+        # Handle other dict structures - try to extract string content
+        if len(value) == 1:
+            first_value = list(value.values())[0]
+            if isinstance(first_value, str):
+                return first_value
+        
+        # If it's a complex dict, convert to JSON string
+        try:
+            import json
+            return json.dumps(value, ensure_ascii=False)
+        except:
+            return str(value)
+    
+    return str(value)
+    
 @tool
-def generate_documents(topics: List[str], docs_per_topic: int = 1, max_tokens_per_doc: int = 600, batch_size: int = 3, delay_between_batches: float = 2.0) -> str:
-    """Generate multiple optimized documents for specific topics with controlled length and rate limiting
+def generate_documents_as_files(topics: List[str], docs_per_topic: int = 3, max_tokens_per_doc: int = 800, batch_size: int = 2, delay_between_batches: float = 2.0) -> str:
+    """Generate documents for specified topics and save each as individual JSON files"""
     
-    Args:
-        topics: List of topics to generate documents for
-        docs_per_topic: Number of documents to generate per topic (default: 1)
-        max_tokens_per_doc: Maximum tokens per document for efficiency (default: 600)
-        batch_size: Number of topics to process in each batch (default: 3)
-        delay_between_batches: Delay in seconds between batches (default: 2.0)
-    
-    Returns:
-        JSON string containing list of document dictionaries with controlled length and diverse perspectives
-    """
-    
-    # Safety check: limit max execution time and document count
-    MAX_EXECUTION_TIME = 300  # 5 minutes max
-    MAX_TOTAL_DOCUMENTS = 100  # Never generate more than 100 documents
+    MAX_EXECUTION_TIME = 300
+    MAX_TOTAL_DOCUMENTS = 100
     
     start_time = time.time()
     
     if len(topics) * docs_per_topic > MAX_TOTAL_DOCUMENTS:
         print(f"⚠️ Warning: Requested {len(topics) * docs_per_topic} documents exceeds limit of {MAX_TOTAL_DOCUMENTS}")
-        print(f"   Reducing docs_per_topic to maintain limit...")
         docs_per_topic = min(docs_per_topic, MAX_TOTAL_DOCUMENTS // len(topics))
     
+    # Create documents directory structure
+    docs_dir = Path(SETTINGS.persist_dir) / "documents"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    
     print(f"🚀 Starting document generation for {len(topics)} topics ({docs_per_topic} docs each)")
-    print(f"   Maximum execution time: {MAX_EXECUTION_TIME}s")
-    print(f"   Maximum total documents: {MAX_TOTAL_DOCUMENTS}")
+    print(f"📁 Documents will be saved to: {docs_dir}")
 
     llm = AzureChatOpenAI(
         deployment_name=CHAT_MODEL,
         openai_api_version=API_VERSION,
         azure_endpoint=CLIENT_AZURE,
         openai_api_key=API_KEY,
-        temperature=0.2,  # Slightly higher for diversity between docs
-        max_tokens=max_tokens_per_doc,  # Control output length
-        request_timeout=30  # Add timeout for reliability
-        )
+        temperature=0.2,
+        max_tokens=max_tokens_per_doc,
+        request_timeout=30
+    )
 
-    documents = []
-    start_time = time.time()
+    generated_files = []
     
-    # Document generation strategies for efficiency and diversity
+    # Define comprehensive document generation strategies for each topic
     doc_strategies = [
         {
-            "focus": "fundamentals",
-            "system_prompt": "You are a technical educator. Create concise, structured content focusing on core concepts and definitions.",
-            "user_prompt": "Generate a focused overview of {topic} covering: 1) Key definitions 2) Core principles 3) Main applications. Keep it concise but comprehensive.",
-            "doc_type": "fundamentals"
+            "focus": "comprehensive_overview",
+            "system_prompt": "You are an expert knowledge creator. Create comprehensive, detailed content with specific facts, key concepts, and practical information.",
+            "user_prompt": """Create a comprehensive guide about {topic}. Include:
+1. Key definitions and concepts
+2. Historical background and development
+3. Current status and trends
+4. Important figures and organizations
+5. Key statistics and facts
+6. Benefits and challenges
+7. Future outlook
+8. Practical applications
+
+Make it informative and specific to {topic}. Use concrete examples and data when possible.""",
+            "doc_type": "comprehensive_overview"
         },
         {
-            "focus": "practical",
-            "system_prompt": "You are a practical expert. Create actionable content with real-world examples and implementations.",
-            "user_prompt": "Generate practical insights about {topic} covering: 1) Real-world use cases 2) Implementation examples 3) Best practices. Focus on actionable information.",
-            "doc_type": "practical"
-        },
-        {
-            "focus": "advanced",
-            "system_prompt": "You are a research specialist. Create in-depth content covering advanced concepts and recent developments.",
-            "user_prompt": "Generate advanced analysis of {topic} covering: 1) Recent developments 2) Technical challenges 3) Future trends. Focus on cutting-edge insights.",
-            "doc_type": "advanced"
-        },
-        {
-            "focus": "comparative",
-            "system_prompt": "You are a comparative analyst. Create content that compares and contrasts different approaches or methodologies.",
-            "user_prompt": "Generate comparative analysis of {topic} covering: 1) Different approaches 2) Advantages/disadvantages 3) When to use each. Focus on decision-making insights.",
-            "doc_type": "comparative"
+            "focus": "detailed_analysis",
+            "system_prompt": "You are a subject matter expert. Create detailed analytical content focusing on specific aspects and technical details.",
+            "user_prompt": """Provide a detailed analysis of {topic} covering:
+1. Technical specifications and characteristics
+2. Comparative analysis with similar topics
+3. Strengths and weaknesses
+4. Market position and influence
+5. Key stakeholders and players
+6. Performance metrics and indicators
+7. Best practices and recommendations
+8. Case studies and examples
+
+Focus on depth and specificity for {topic}.""",
+            "doc_type": "detailed_analysis"
         }
     ]
     
-    # Process topics in batches to avoid rate limits
     total_batches = (len(topics) + batch_size - 1) // batch_size
     
     for batch_num, batch_start in enumerate(range(0, len(topics), batch_size)):
-        batch_topics = topics[batch_start:batch_start + batch_size]
-        print(f"📦 Processing batch {batch_num + 1}/{total_batches}: {len(batch_topics)} topics")
+        batch_end = min(batch_start + batch_size, len(topics))
+        batch_topics = topics[batch_start:batch_end]
         
-        for topic in batch_topics:
-            # Safety check: ensure we don't exceed max execution time
-            if time.time() - start_time > MAX_EXECUTION_TIME:
-                print(f"⚠️ Maximum execution time ({MAX_EXECUTION_TIME}s) reached. Stopping generation.")
-                break
-                
-            print(f"   🔄 Generating {docs_per_topic} optimized documents for: {topic}")
+        print(f"\n📦 Processing batch {batch_num + 1}/{total_batches}: {len(batch_topics)} topics")
+        
+        for topic_str in batch_topics:
+            subject, topic = parse_topic_info(topic_str)
+            print(f"   🔹 Generating {docs_per_topic} documents for: {subject} -> {topic}")
             
-            # Select strategies based on docs_per_topic
-            selected_strategies = doc_strategies[:docs_per_topic]
+            # Create subject directory
+            subject_dir = docs_dir / subject
+            subject_dir.mkdir(parents=True, exist_ok=True)
             
-            for doc_num, strategy in enumerate(selected_strategies):
-                # Double safety check for time limit
+            # Generate documents for this topic using different strategies
+            for doc_index in range(docs_per_topic):
                 if time.time() - start_time > MAX_EXECUTION_TIME:
-                    print(f"⚠️ Time limit reached during document generation. Stopping.")
+                    print(f"⏰ Time limit reached. Stopping generation.")
                     break
+                
+                # Select strategy (cycle through available strategies)
+                strategy = doc_strategies[doc_index % len(doc_strategies)]
+                
+                # Create the chat prompt
                 prompt = ChatPromptTemplate.from_messages([
                     ("system", strategy["system_prompt"]),
-                    ("human", strategy["user_prompt"].format(topic=topic))
+                    ("user", strategy["user_prompt"])
                 ])
                 
                 try:
+                    # Generate the document
                     chain = prompt | llm
-                    result = chain.invoke({"topic": topic})
+                    response = chain.invoke({"topic": topic})
+                    content = response.content
                     
-                    content = result.content if hasattr(result, 'content') else str(result)
-                    
-                    # Estimate token count (rough approximation: 1 token ≈ 4 characters)
-                    estimated_tokens = len(content) // 4
-                    
-                    documents.append({
+                    # Create document data structure
+                    doc_data = {
+                        "id": str(uuid.uuid4()),
+                        "subject": subject,
                         "topic": topic,
-                        "content": content,
-                        "source": f"generated_{topic}_{strategy['focus']}_doc{doc_num + 1}",
+                        "full_topic": topic_str,
                         "doc_type": strategy["doc_type"],
-                        "focus_area": strategy["focus"],
-                        "estimated_tokens": estimated_tokens,
-                        "generation_strategy": f"{strategy['focus']}_optimized",
-                        "batch_number": batch_num + 1
-                    })
+                        "doc_index": doc_index,
+                        "content": content,
+                        "estimated_tokens": len(content.split()) * 1.3,  # Rough estimate
+                        "generated_at": datetime.now().isoformat(),
+                        "strategy": strategy["focus"],
+                        "metadata": {
+                            "subject": subject,
+                            "topic": topic,
+                            "doc_type": strategy["doc_type"],
+                            "source": "ai_generated"
+                        }
+                    }
                     
-                    print(f"      ✓ {strategy['focus']} document (~{estimated_tokens} tokens)")
+                    # Create filename and save the document
+                    filename = create_document_filename(subject, topic, strategy["doc_type"], doc_index)
+                    file_path = subject_dir / filename
                     
-                    # Small delay between documents to avoid overwhelming the API
-                    if doc_num < len(selected_strategies) - 1:
-                        time.sleep(0.5)
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(doc_data, f, ensure_ascii=False, indent=2)
+                    
+                    generated_files.append(str(file_path))
+                    print(f"      ✅ Saved: {filename} ({len(content)} chars)")
                     
                 except Exception as e:
-                    print(f"      ✗ Error generating {strategy['focus']} document: {e}")
-                    # Add a fallback minimal document
-                    documents.append({
+                    print(f"      ❌ Error generating document {doc_index} for {topic}: {e}")
+                    # Create fallback document
+                    fallback_data = {
+                        "id": str(uuid.uuid4()),
+                        "subject": subject,
                         "topic": topic,
-                        "content": f"Brief overview of {topic} - content generation failed but topic recorded for database.",
-                        "source": f"fallback_{topic}_doc{doc_num + 1}",
+                        "full_topic": topic_str,
                         "doc_type": "fallback",
-                        "focus_area": strategy["focus"],
+                        "doc_index": doc_index,
+                        "content": f"Basic information about {topic}. This is a fallback document generated due to generation error.",
                         "estimated_tokens": 20,
-                        "generation_strategy": "fallback",
-                        "batch_number": batch_num + 1
-                    })
+                        "generated_at": datetime.now().isoformat(),
+                        "strategy": "fallback",
+                        "error": str(e),
+                        "metadata": {
+                            "subject": subject,
+                            "topic": topic,
+                            "doc_type": "fallback",
+                            "source": "ai_generated_fallback"
+                        }
+                    }
+                    
+                    filename = create_document_filename(subject, topic, "fallback", doc_index)
+                    file_path = subject_dir / filename
+                    
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(fallback_data, f, ensure_ascii=False, indent=2)
+                    
+                    generated_files.append(str(file_path))
         
-        # Delay between batches to respect rate limits
-        if batch_num < total_batches - 1:
-            print(f"   ⏳ Waiting {delay_between_batches}s before next batch...")
+        # Add delay between batches to respect rate limits
+        if batch_num < total_batches - 1 and delay_between_batches > 0:
+            print(f"   ⏱️ Waiting {delay_between_batches}s before next batch...")
             time.sleep(delay_between_batches)
     
-    total_tokens = sum(doc.get("estimated_tokens", 0) for doc in documents)
     generation_time = time.time() - start_time
-    successful_docs = len([d for d in documents if d.get("doc_type") != "fallback"])
     
     print(f"\n📊 Generation Summary:")
-    print(f"   ✓ {len(documents)} total documents ({successful_docs} successful, {len(documents)-successful_docs} fallback)")
-    print(f"   ✓ {len(topics)} topics processed in {total_batches} batches")
-    print(f"   ✓ Total estimated tokens: {total_tokens:,} (avg {total_tokens//len(documents) if documents else 0} per doc)")
-    print(f"   ✓ Generation time: {generation_time:.2f}s (avg {generation_time/len(documents):.2f}s per doc)")
-    print(f"   ✓ Token efficiency: {total_tokens/generation_time:.0f} tokens/second")
+    print(f"   ✓ {len(generated_files)} individual document files created")
+    print(f"   ✓ Saved to: {docs_dir}")
+    print(f"   ✓ Generation time: {generation_time:.2f}s")
     
-    # Return as JSON string for easy transfer between tasks
-    import json
-    return json.dumps(documents, ensure_ascii=False, indent=2)
+    # Return summary information
+    return json.dumps({
+        "status": "success",
+        "total_files": len(generated_files),
+        "files": generated_files,
+        "docs_directory": str(docs_dir),
+        "generation_time": generation_time,
+        "topics_processed": len(topics),
+        "docs_per_topic": docs_per_topic
+    }, ensure_ascii=False, indent=2)
 
 @tool
 def create_vectordb() -> str:
-    '''Create or initialize the Vector Database to be used for RAG with WebRAGFlow.'''
+    """Create or initialize the Vector Database"""
     
-    # Create directory if it doesn't exist
     Path(SETTINGS.persist_dir).mkdir(parents=True, exist_ok=True)
     
-    # Initialize with empty documents
     initial_doc = Document(
         page_content="Vector database initialized",
         metadata={"source": "system", "topic": "initialization"}
@@ -238,443 +334,468 @@ def create_vectordb() -> str:
     return f"Vector database created successfully at {SETTINGS.persist_dir}"
 
 @tool
-def store_in_vectordb(**kwargs) -> str:
-    """Store generated content in the FAISS vector database for use with WebRAGFlow
+def store_individual_documents() -> str:
+    """Load individual JSON document files and store them in the FAISS vector database"""
     
-    Args:
-        Accepts any combination of parameters:
-        - content: JSON string, plain text, or dict with content
-        - topic: Optional topic name
-        - Any other parameters passed by CrewAI agent
+    print(f"\n🔧 STORE_INDIVIDUAL_DOCUMENTS:")
     
-    Returns:
-        Success message with details about stored documents
-    """
+    docs_dir = Path(SETTINGS.persist_dir) / "documents"
     
-    print(f"\n🔧 STORE_IN_VECTORDB DEBUG:")
-    print(f"   Kwargs received: {list(kwargs.keys())}")
-    print(f"   Full kwargs: {str(kwargs)[:500]}...")
+    if not docs_dir.exists():
+        return json.dumps({
+            "error": "Documents directory not found",
+            "path": str(docs_dir),
+            "message": "Run generate_documents_as_files first"
+        })
     
-    # Extract content from various possible formats
-    actual_content = None
-    topic = kwargs.get('topic')
+    # Find all JSON document files
+    json_files = list(docs_dir.rglob("*.json"))
+    print(f"   📄 Found {len(json_files)} document files")
     
-    # Try different ways to get the content
-    if 'content' in kwargs:
-        actual_content = kwargs['content']
-        print(f"   Found content in kwargs: {type(actual_content)}")
-    elif len(kwargs) == 1:
-        # If there's only one argument, it might be the content
-        key = list(kwargs.keys())[0]
-        actual_content = kwargs[key]
-        print(f"   Using single arg '{key}' as content: {type(actual_content)}")
-    else:
-        # Maybe the entire kwargs is a wrapped content
-        actual_content = kwargs
-        print(f"   Using entire kwargs as content: {type(actual_content)}")
+    if not json_files:
+        return json.dumps({
+            "error": "No document files found",
+            "path": str(docs_dir)
+        })
     
-    # Handle the case where CrewAI wraps the data in a dict
-    if isinstance(actual_content, dict):
-        print(f"   Content is dict with keys: {list(actual_content.keys())}")
-        if 'content' in actual_content:
-            actual_content = actual_content['content']
-            print(f"   Extracted content from dict, new type: {type(actual_content)}")
-            # Also try to get topic from the dict if not provided
-            if topic is None and 'topic' in kwargs:
-                topic = kwargs['topic']
-                print(f"   Extracted topic from kwargs: {topic}")
-    
-    # Final validation
-    if actual_content is None:
-        return "❌ Error: No content provided to store"
-    
+    # Load all documents
     documents = []
+    file_stats = {}
     
-    # Try to parse content as JSON first (from generate_documents output)
-    try:
-        import json
-        
-        # Handle string input
-        if isinstance(actual_content, str):
-            content_str = actual_content.strip()
-            print(f"   Processing as string, starts with: {content_str[:50]}")
+    for json_file in json_files:
+        try:
+            with open(json_file, 'r', encoding='utf-8') as f:
+                doc_data = json.load(f)
             
-            # Try to parse as JSON
-            if content_str.startswith('[') or content_str.startswith('{'):
-                parsed_content = json.loads(content_str)
-                print(f"   Successfully parsed JSON, type: {type(parsed_content)}")
-                
-                # Handle case where it's wrapped in another dict
-                if isinstance(parsed_content, dict) and 'content' in parsed_content:
-                    parsed_content = parsed_content['content']
-                    print(f"   Unwrapped content, new type: {type(parsed_content)}")
-                
-                # Handle list of documents
-                if isinstance(parsed_content, list):
-                    print(f"   Processing {len(parsed_content)} documents from list")
-                    for i, item in enumerate(parsed_content):
-                        if isinstance(item, dict) and 'content' in item:
-                            # Create metadata with string conversion for compatibility
-                            metadata = {
-                                "topic": str(item.get("topic", topic or "unknown")),
-                                "source": str(item.get("source", "generated"))
-                            }
-                            # Add additional metadata fields if present, converting to strings
-                            for key, value in item.items():
-                                if key not in ["content", "topic", "source"]:
-                                    metadata[key] = str(value)
-                                    
-                            doc = Document(
-                                page_content=item.get("content", ""),
-                                metadata=metadata
-                            )
-                            documents.append(doc)
-                            print(f"     ✓ Document {i+1}: topic={metadata['topic']}, length={len(item.get('content', ''))}")
-                else:
-                    # Single document as dict
-                    if isinstance(parsed_content, dict) and 'content' in parsed_content:
-                        metadata = {
-                            "topic": str(parsed_content.get("topic", topic or "unknown")),
-                            "source": str(parsed_content.get("source", "generated"))
-                        }
-                        doc = Document(
-                            page_content=parsed_content.get("content", ""),
-                            metadata=metadata
-                        )
-                        documents.append(doc)
-                        print(f"   ✓ Single document: topic={metadata['topic']}")
-            else:
-                print(f"   Content doesn't start with JSON markers, treating as plain text")
-                raise ValueError("Not JSON format")
-        
-        # Handle case where actual_content is already a parsed list/dict
-        elif isinstance(actual_content, (list, dict)):
-            print(f"   Content is already parsed: {type(actual_content)}")
-            parsed_content = actual_content
-            
-            if isinstance(parsed_content, list):
-                print(f"   Processing {len(parsed_content)} documents from list")
-                for i, item in enumerate(parsed_content):
-                    if isinstance(item, dict) and 'content' in item:
-                        # Create metadata with string conversion for compatibility
-                        metadata = {
-                            "topic": str(item.get("topic", topic or "unknown")),
-                            "source": str(item.get("source", "generated"))
-                        }
-                        # Add additional metadata fields if present, converting to strings
-                        for key, value in item.items():
-                            if key not in ["content", "topic", "source"]:
-                                metadata[key] = str(value)
-                                
-                        doc = Document(
-                            page_content=item.get("content", ""),
-                            metadata=metadata
-                        )
-                        documents.append(doc)
-                        print(f"     ✓ Document {i+1}: topic={metadata['topic']}, length={len(item.get('content', ''))}")
-            elif isinstance(parsed_content, dict) and 'content' in parsed_content:
-                metadata = {
-                    "topic": str(parsed_content.get("topic", topic or "unknown")),
-                    "source": str(parsed_content.get("source", "generated"))
+            # Create Langchain Document
+            document = Document(
+                page_content=doc_data["content"],
+                metadata={
+                    "id": doc_data["id"],
+                    "subject": doc_data["subject"],
+                    "topic": doc_data["topic"],
+                    "doc_type": doc_data["doc_type"],
+                    "doc_index": doc_data["doc_index"],
+                    "source": doc_data.get("strategy", "unknown"),
+                    "file_path": str(json_file),
+                    "generated_at": doc_data.get("generated_at", "unknown")
                 }
-                doc = Document(
-                    page_content=parsed_content.get("content", ""),
-                    metadata=metadata
-                )
-                documents.append(doc)
-                print(f"   ✓ Single document: topic={metadata['topic']}")
-                
-    except (json.JSONDecodeError, ValueError) as e:
-        # Content is not JSON, treat as plain text
-        print(f"   JSON parsing failed: {e}")
-        print(f"   Treating as plain text content")
-        pass
-    
-    # If no documents were parsed from JSON, treat as plain text
-    if not documents:
-        print(f"   Creating document from plain text (length: {len(str(actual_content))})")
-        doc = Document(
-            page_content=str(actual_content),
-            metadata={"topic": topic or "general", "source": f"generated_{topic or 'content'}.md"}
-        )
-        documents.append(doc)
+            )
+            
+            documents.append(document)
+            
+            # Track stats
+            subject = doc_data["subject"]
+            topic = doc_data["topic"]
+            key = f"{subject}/{topic}"
+            if key not in file_stats:
+                file_stats[key] = 0
+            file_stats[key] += 1
+            
+            print(f"   ✅ Loaded: {json_file.stem} ({len(doc_data['content'])} chars)")
+            
+        except Exception as e:
+            print(f"   ❌ Error loading {json_file}: {e}")
+            continue
     
     if not documents:
-        return "❌ Error: No valid documents found to store"
+        return json.dumps({
+            "error": "No valid documents could be loaded",
+            "files_found": len(json_files)
+        })
     
-    print(f"   📄 Total documents to process: {len(documents)}")
+    print(f"\n   📊 Document distribution:")
+    for key, count in file_stats.items():
+        print(f"      {key}: {count} documents")
     
     # Split documents into chunks
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=SETTINGS.chunk_size,
-        chunk_overlap=SETTINGS.chunk_overlap
+        chunk_overlap=SETTINGS.chunk_overlap,
+        separators=["\n\n", "\n", ". ", " ", ""]  # Better separators for structured content
     )
     chunks = splitter.split_documents(documents)
-    print(f"   🔪 Split into {len(chunks)} chunks")
+    print(f"   🔪 Split into {len(chunks)} chunks (chunk_size={SETTINGS.chunk_size}, overlap={SETTINGS.chunk_overlap})")
+    
+    # Debug: Show sample chunks to verify quality
+    if chunks:
+        print(f"   🔍 Sample chunk preview:")
+        sample_chunk = chunks[0]
+        content_preview = sample_chunk.page_content[:200] + "..." if len(sample_chunk.page_content) > 200 else sample_chunk.page_content
+        print(f"      First chunk ({len(sample_chunk.page_content)} chars): {content_preview}")
+        if len(chunks) > 1:
+            sample_chunk = chunks[len(chunks)//2]
+            content_preview = sample_chunk.page_content[:200] + "..." if len(sample_chunk.page_content) > 200 else sample_chunk.page_content
+            print(f"      Middle chunk ({len(sample_chunk.page_content)} chars): {content_preview}")
     
     # Load or create vector store
     persist_dir = SETTINGS.persist_dir
     try:
-        if Path(persist_dir).exists() and Path(persist_dir, "index.faiss").exists():
-            print(f"   📚 Loading existing vector store from {persist_dir}")
-            vector_store = FAISS.load_local(
-                persist_dir,
-                EMBEDDINGS,
-                allow_dangerous_deserialization=True
-            )
+        if Path(persist_dir, "index.faiss").exists():
+            print(f"   📂 Loading existing FAISS index from {persist_dir}")
+            vector_store = FAISS.load_local(persist_dir, EMBEDDINGS, allow_dangerous_deserialization=True)
+            # Add new chunks to existing store
             vector_store.add_documents(chunks)
-            print(f"   ➕ Added {len(chunks)} chunks to existing store")
         else:
-            print(f"   🆕 Creating new vector store at {persist_dir}")
-            Path(persist_dir).mkdir(parents=True, exist_ok=True)
+            print(f"   🆕 Creating new FAISS index")
             vector_store = FAISS.from_documents(chunks, EMBEDDINGS)
-            print(f"   ✅ Created new store with {len(chunks)} chunks")
-
-        # Save vector store
-        vector_store.save_local(persist_dir)
-        print(f"   💾 Saved vector store successfully")
         
-        topics_stored = set([doc.metadata.get("topic", "unknown") for doc in documents])
-        result = f"✅ Successfully stored {len(chunks)} chunks from {len(documents)} documents for topics: {', '.join(topics_stored)}"
-        print(f"   🎉 {result}")
-        return result
-    
+        # Save the updated vector store
+        vector_store.save_local(persist_dir)
+        print(f"   💾 Vector store saved to {persist_dir}")
+        
     except Exception as e:
-        error_msg = f"❌ Error storing documents in vector database: {str(e)}"
-        print(f"   {error_msg}")
-        import traceback
-        traceback.print_exc()
-        return error_msg
-    vector_store.save_local(persist_dir)
+        print(f"   ❌ Vector store error: {e}")
+        return json.dumps({
+            "error": f"Vector store error: {e}",
+            "documents_loaded": len(documents),
+            "chunks_created": len(chunks)
+        })
     
-    topics_stored = set([doc.metadata.get("topic", "unknown") for doc in documents])
-    return f"Successfully stored {len(chunks)} chunks for topics: {', '.join(topics_stored)}"
+    # Create detailed summary
+    chunk_stats = {}
+    for chunk in chunks:
+        subject = chunk.metadata.get("subject", "unknown")
+        topic = chunk.metadata.get("topic", "unknown")
+        key = f"{subject}/{topic}"
+        if key not in chunk_stats:
+            chunk_stats[key] = 0
+        chunk_stats[key] += 1
+    
+    print(f"\n   📈 Chunk distribution:")
+    for key, count in chunk_stats.items():
+        print(f"      {key}: {count} chunks")
+    
+    return json.dumps({
+        "status": "success",
+        "documents_loaded": len(documents),
+        "chunks_created": len(chunks),
+        "chunks_stored": len(chunks),
+        "files_processed": len(json_files),
+        "chunk_distribution": chunk_stats,
+        "document_distribution": file_stats,
+        "persist_dir": persist_dir
+    }, ensure_ascii=False, indent=2)
 
+# Keep existing retrieve function
 @tool
-def retrieve_from_vectordb(query: str, topic: Optional[str] = None, subject: Optional[str] = None, k: Optional[int] = None) -> str:
-    """
-    Retrieve raw information from the vector database without formatting.
-    Returns raw documents for further processing.
-    """
+def retrieve_from_vectordb(query: str, topic: Optional[str] = None, subject: Optional[str] = None, k: int = 5) -> str:
+    """Retrieve information from the vector database and return structured content"""
+    
+    print(f"\n🔍 RETRIEVE_FROM_VECTORDB:")
+    
+    # Normalize inputs to handle CrewAI wrapped parameters
+    query = normalize_input(query)
+    topic = normalize_input(topic)
+    subject = normalize_input(subject)
+    k = normalize_input(k)
+    
+    print(f"   Query: {query}")
+    print(f"   Topic: {topic}")
+    print(f"   Subject: {subject}")
+    print(f"   K: {k}")
+    
+    # Validate inputs
+    if not query or query.strip() == "":
+        return "ERROR: Query cannot be empty"
+    
+    # Check embeddings availability
+    if not safe_embeddings_check():
+        return "ERROR: Embeddings not available"
     
     # Load FAISS index from correct path
     persist_dir = SETTINGS.persist_dir
-    if not Path(persist_dir).exists() or not Path(persist_dir, "index.faiss").exists():
-        return json.dumps([{"error": "Vector database not found", "content": "Please ensure RAG database is properly initialized."}])
+    print(f"   Persist dir: {persist_dir}")
+    print(f"   Dir exists: {Path(persist_dir).exists()}")
+    print(f"   Index exists: {Path(persist_dir, 'index.faiss').exists()}")
     
-    vector_store = FAISS.load_local(
-        persist_dir,
-        EMBEDDINGS,
-        allow_dangerous_deserialization=True
-    )
+    if not Path(persist_dir).exists() or not Path(persist_dir, "index.faiss").exists():
+        return f"ERROR: Vector database not found at {persist_dir}"
+    
+    try:
+        vector_store = FAISS.load_local(
+            persist_dir, 
+            EMBEDDINGS, 
+            allow_dangerous_deserialization=True
+        )
+        print(f"   📂 Vector store loaded successfully")
+        
+    except Exception as e:
+        return f"ERROR: Failed to load vector store: {e}"
     
     # Build search query with both subject and topic if available
     if subject and topic:
-        search_query = f"{subject} {topic}: {query}"
+        search_query = f"{subject} {topic} {query}"
     elif topic:
-        search_query = f"{topic}: {query}"
+        search_query = f"{topic} {query}"
     else:
         search_query = query
     
-    # Use custom k if provided (default to 10 for comprehensive coverage)
-    search_k = k if k is not None else 10
+    print(f"   🔎 Search query: '{search_query}'")
     
-    # Perform similarity search with MMR
-    retriever = vector_store.as_retriever(
-        search_type=SETTINGS.search_type,
-        search_kwargs={
-            "k": search_k,
-            "fetch_k": SETTINGS.fetch_k,
-            "lambda_mult": SETTINGS.mmr_lambda
-        }
-    )
+    # Use custom k if provided (default to 5 for focused results)
+    try:
+        search_k = int(k) if k else 5
+    except (ValueError, TypeError):
+        search_k = 5
+    print(f"   📝 Search parameters: k={search_k}")
     
-    docs = retriever.invoke(search_query)
+    try:
+        docs = vector_store.similarity_search_with_score(
+            search_query, 
+            k=search_k * 2  # Get more docs for filtering
+        )
+        print(f"   🔍 Raw similarity search returned: {len(docs)} documents")
+                            
+    except Exception as e:
+        return f"ERROR: Search failed: {e}"
+
+    # Remove duplicates while preserving order
+    seen_content = set()
+    unique_docs = []
+    for doc, score in docs:
+        content_hash = hash(doc.page_content[:100])  # Use first 100 chars as hash
+        if content_hash not in seen_content:
+            seen_content.add(content_hash)
+            unique_docs.append((doc, score))
+
+    docs = unique_docs[:search_k]  # Limit to requested number
+    print(f"   🔹 Final unique documents: {len(docs)}")
+
+    if not docs:
+        return f"ERROR: No relevant documents found for query: {search_query}"
+
+    # Format results as clear text for the next agent
+    result_text = f"RETRIEVED DOCUMENTS FOR QUERY: '{query}'\n"
+    result_text += f"TOPIC: {topic or 'N/A'}\n"
+    result_text += f"SUBJECT: {subject or 'N/A'}\n"
+    result_text += f"SEARCH PERFORMED: {search_query}\n\n"
     
-    # Return raw content for processing
-    results = []
-    for doc in docs:
-        source = doc.metadata.get("source", "unknown")
-        doc_topic = doc.metadata.get("topic", "general")
-        doc_subject = doc.metadata.get("subject", "general")
-        content = doc.page_content
-        results.append({
-            "content": content,
-            "topic": doc_topic,
-            "subject": doc_subject,
-            "source": source
-        })
+    for i, (doc, score) in enumerate(docs, 1):
+        result_text += f"--- DOCUMENT {i} (Score: {score:.3f}) ---\n"
+        result_text += f"Content: {doc.page_content}\n"
+        
+        # Add metadata if available
+        metadata = doc.metadata
+        if metadata:
+            if 'subject' in metadata:
+                result_text += f"Subject: {metadata['subject']}\n"
+            if 'topic' in metadata:
+                result_text += f"Topic: {metadata['topic']}\n"
+            if 'source' in metadata:
+                result_text += f"Source: {metadata['source']}\n"
+        
+        result_text += "\n"
     
-    if not results:
-        return json.dumps([{"error": "No results", "content": f"No relevant information found for query: {search_query}"}])
-    
-    # Return as JSON string for easy parsing
-    return json.dumps(results)
+    print(f"   ✅ Returning {len(docs)} results as structured text")
+    return result_text
 
 @tool
-def format_content_as_guide(retrieved_info: str, query: str, topic: str, subject: Optional[str] = None) -> str:
-    """
-    Format retrieved content into a structured guide following GuideOutline model.
-    This tool is used by content_synthesizer to create properly formatted guides.
-    Returns a JSON string that can be parsed into GuideOutline.
-    """
+def format_content_as_guide(retrieved_info: Union[str, dict], query: str, topic: str, subject: Optional[str] = None) -> str:
+    """Format retrieved content into a structured guide using clear input from retrieve_from_vectordb"""
     
-    llm = AzureChatOpenAI(
-        deployment_name=CHAT_MODEL,
-        openai_api_version=API_VERSION,
-        azure_endpoint=CLIENT_AZURE,
-        openai_api_key=API_KEY,
-        temperature=0.3
-    )
+    print(f"\n📝 FORMAT_CONTENT_AS_GUIDE:")
     
-    # Parse retrieved information
-    try:
-        docs = json.loads(retrieved_info) if isinstance(retrieved_info, str) else retrieved_info
-        # Check for errors in retrieved data
-        if docs and isinstance(docs[0], dict) and "error" in docs[0]:
-            # Create minimal guide with error info
-            error_guide = GuideOutline(
-                title=f"Limited Information Available for {topic}",
-                introduction=f"Limited information is available about {topic}. {docs[0].get('content', '')}",
-                target_audience="General audience",
-                sections=[
-                    Section(
-                        title="Information Status",
-                        description=docs[0].get('content', 'No information available')
-                    )
-                ],
-                conclusion="Please check back later or consult alternative sources."
-            )
-            return error_guide.model_dump_json(indent=2)
-    except Exception as e:
-        docs = [{"content": retrieved_info, "topic": topic, "source": "unknown"}]
+    # Normalize inputs to handle CrewAI wrapped parameters
+    retrieved_info = normalize_input(retrieved_info)
+    query = normalize_input(query)
+    topic = normalize_input(topic)
+    subject = normalize_input(subject)
     
-    # Combine all content
-    combined_content = "\n\n".join([doc.get("content", "") for doc in docs if "error" not in doc])
+    print(f"   Query: {query}")
+    print(f"   Topic: {topic}")
+    print(f"   Subject: {subject}")
+    print(f"   Retrieved info length: {len(str(retrieved_info))}")
     
-    if not combined_content:
-        # No valid content found
-        minimal_guide = GuideOutline(
-            title=f"Guide to {topic}",
-            introduction=f"Information about {topic} in {subject or 'general context'}",
+    # Validate inputs
+    if not query or query.strip() == "":
+        query = "Information request"
+    if not topic or topic.strip() == "":
+        topic = "General topic"
+    
+    # Check if retrieved_info contains an error
+    if not retrieved_info or "ERROR:" in str(retrieved_info):
+        error_msg = retrieved_info if retrieved_info else "No information retrieved"
+        print(f"   ⚠️ Error in retrieved data: {error_msg}")
+        
+        error_guide = GuideOutline(
+            title=f"Information Request: {topic}",
+            introduction=f"We attempted to find information about {topic} in our database.",
             target_audience="General audience",
             sections=[
-                Section(title="Overview", description="General information about the topic"),
-                Section(title="Key Points", description="Important aspects to consider"),
-                Section(title="Conclusion", description="Summary of main points")
+                Section(
+                    title="Search Status",
+                    description=f"Database search completed but encountered an issue: {error_msg}"
+                ),
+                Section(
+                    title="Alternative Approach", 
+                    description="For comprehensive information about this topic, consider using web search or consulting external sources."
+                )
             ],
-            conclusion="This guide provides an overview of the topic."
+            conclusion="The requested information was not available in our current knowledge base."
+        )
+        return error_guide.model_dump_json(indent=2)
+    
+    # Parse the structured text response from retrieve_from_vectordb
+    print(f"   📄 Processing structured text input...")
+    
+    # Extract documents from the structured text
+    documents = []
+    current_doc = {}
+    content_buffer = []
+    
+    lines = retrieved_info.split('\n')
+    in_document = False
+    
+    for line in lines:
+        if line.startswith('--- DOCUMENT '):
+            # Save previous document if exists
+            if current_doc and content_buffer:
+                current_doc['content'] = '\n'.join(content_buffer).strip()
+                documents.append(current_doc)
+            
+            # Start new document
+            current_doc = {}
+            content_buffer = []
+            in_document = True
+            
+            # Extract score if available
+            if 'Score:' in line:
+                try:
+                    score_str = line.split('Score: ')[1].split(')')[0]
+                    current_doc['score'] = float(score_str)
+                except:
+                    current_doc['score'] = 0.0
+            
+        elif line.startswith('Content: '):
+            content_buffer.append(line[9:])  # Remove 'Content: ' prefix
+        elif line.startswith('Subject: '):
+            current_doc['subject'] = line[9:]
+        elif line.startswith('Topic: '):
+            current_doc['topic'] = line[7:]
+        elif line.startswith('Source: '):
+            current_doc['source'] = line[8:]
+        elif in_document and line.strip() and not line.startswith('---'):
+            content_buffer.append(line)
+    
+    # Save last document
+    if current_doc and content_buffer:
+        current_doc['content'] = '\n'.join(content_buffer).strip()
+        documents.append(current_doc)
+    
+    print(f"   📊 Extracted {len(documents)} documents from structured text")
+    
+    # Combine all content
+    combined_content = ""
+    sources_used = []
+    
+    for doc in documents:
+        if doc.get('content'):
+            combined_content += doc['content'] + "\n\n"
+            if doc.get('source'):
+                sources_used.append(doc['source'])
+    
+    combined_content = combined_content.strip()
+    print(f"   📄 Combined content length: {len(combined_content)}")
+    
+    if not combined_content or len(combined_content.strip()) < 50:
+        print(f"   ⚠️ Insufficient content found, creating minimal guide")
+        minimal_guide = GuideOutline(
+            title=f"Information Overview: {topic}",
+            introduction=f"This guide provides available information about {topic} in the context of {subject or 'general knowledge'}.",
+            target_audience="General audience",
+            sections=[
+                Section(
+                    title="Topic Overview",
+                    description=f"We searched for information about {topic} but found limited content in our current database."
+                ),
+                Section(
+                    title="Search Context",
+                    description=f"Your query was: '{query}'. This topic may require additional research from external sources."
+                ),
+                Section(
+                    title="Next Steps", 
+                    description="Consider refining your search terms or exploring related topics that may be available in our knowledge base."
+                )
+            ],
+            conclusion="This guide represents the available information for your query. For more comprehensive details, additional sources may be needed."
         )
         return minimal_guide.model_dump_json(indent=2)
     
-    # Create prompt for guide generation
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are an expert content synthesizer. Create a comprehensive guide from the provided information.
-        
-        The guide must follow this EXACT JSON structure:
-        {
-            "title": "Clear and descriptive title",
-            "introduction": "Comprehensive introduction to the topic",
-            "target_audience": "Clear description of who this guide is for",
-            "sections": [
-                {
-                    "title": "Section Title",
-                    "description": "Detailed content for this section"
-                }
-            ],
-            "conclusion": "Summary and key takeaways"
-        }
-        
-        Create 3-5 well-structured sections based on the content.
-        Return ONLY valid JSON that matches the GuideOutline model structure.
-        Do not include any text before or after the JSON."""),
-        
-        ("human", """Create a comprehensive guide about: {topic}
-        Query focus: {query}
-        Subject area: {subject}
-        
-        Based on this retrieved information:
-        {content}
-        
-        Return ONLY the JSON structure, nothing else.""")
-    ])
+    print(f"   � Creating comprehensive guide from {len(documents)} documents")
     
-    chain = prompt | llm
-    result = chain.invoke({
-        "topic": topic,
-        "query": query,
-        "subject": subject or topic,
-        "content": combined_content[:4000]  # Limit content to avoid token limits
-    })
-    
-    # Extract content from result
-    guide_json = result.content if hasattr(result, 'content') else str(result)
-    
-    # Clean JSON string (remove any non-JSON content)
+    # Create structured sections from the documents
     try:
-        # Find the first { and last } to extract JSON
-        start_idx = guide_json.find('{')
-        end_idx = guide_json.rfind('}')
-        if start_idx != -1 and end_idx != -1:
-            guide_json = guide_json[start_idx:end_idx+1]
-    except:
-        pass
-    
-    # Validate and format as GuideOutline
-    try:
-        guide_data = json.loads(guide_json)
+        sections = []
         
-        # Ensure all required fields are present with proper types
-        sections_data = guide_data.get("sections", [])
-        if not sections_data:
-            sections_data = [
-                {"title": "Overview", "description": "General overview of the topic"},
-                {"title": "Details", "description": "Detailed information"},
-                {"title": "Applications", "description": "Practical applications"}
-            ]
+        if len(documents) == 1:
+            # Single document - create logical sections
+            content = documents[0]['content']
+            sections.append(Section(
+                title="Overview",
+                description=content[:800] if len(content) > 800 else content
+            ))
+            if len(content) > 800:
+                sections.append(Section(
+                    title="Additional Details",
+                    description=content[800:1600] if len(content) > 1600 else content[800:]
+                ))
         
-        # Create GuideOutline object
-        guide_outline = GuideOutline(
-            title=guide_data.get("title", f"Comprehensive Guide to {topic}"),
-            introduction=guide_data.get("introduction", f"This guide provides detailed information about {topic}"),
-            target_audience=guide_data.get("target_audience", f"Professionals and enthusiasts interested in {subject or topic}"),
-            sections=[Section(**s) if isinstance(s, dict) else s for s in sections_data],
-            conclusion=guide_data.get("conclusion", "This guide covered the essential aspects of the topic")
+        elif len(documents) == 2:
+            sections.append(Section(
+                title="Primary Information",
+                description=documents[0]['content'][:800]
+            ))
+            sections.append(Section(
+                title="Supporting Information", 
+                description=documents[1]['content'][:800]
+            ))
+        
+        else:  # 3 or more documents
+            sections.append(Section(
+                title="Overview",
+                description=documents[0]['content'][:600]
+            ))
+            sections.append(Section(
+                title="Key Information",
+                description=documents[1]['content'][:600]
+            ))
+            if len(documents) > 2:
+                sections.append(Section(
+                    title="Additional Details",
+                    description=documents[2]['content'][:600]
+                ))
+        
+        # Create the comprehensive guide
+        guide = GuideOutline(
+            title=f"{subject.title() if subject else 'Information'} Guide: {topic.title()}",
+            introduction=f"This comprehensive guide provides detailed information about {topic} based on our knowledge base. The information has been curated to answer your query: '{query}'",
+            target_audience=f"Professionals and enthusiasts interested in {subject or topic}",
+            sections=sections,
+            conclusion=f"This guide provided comprehensive information about {topic} from our specialized knowledge base covering {len(documents)} relevant sources."
         )
         
-        # Return as formatted JSON string
-        return guide_outline.model_dump_json(indent=2)
+        result = guide.model_dump_json(indent=2)
+        print(f"   ✅ Created comprehensive guide (length: {len(result)})")
+        return result
         
     except Exception as e:
-        print(f"Error parsing guide JSON: {e}")
-        # Fallback: create a comprehensive guide structure with actual content
+        print(f"   ⚠️ Error creating comprehensive guide: {e}")
+        
+        # Final fallback
         fallback_guide = GuideOutline(
-            title=f"Comprehensive Guide to {topic}",
-            introduction=f"This guide provides information about {query} focusing on {topic} in the context of {subject or 'general knowledge'}",
-            target_audience=f"Professionals and enthusiasts interested in {subject or topic}",
+            title=f"Information Guide: {topic}",
+            introduction=f"This guide provides information about {query} focusing on {topic}",
+            target_audience="General audience",
             sections=[
                 Section(
-                    title="Overview",
-                    description=combined_content[:500] if combined_content else f"General overview of {topic}"
-                ),
-                Section(
-                    title="Key Concepts",
-                    description=combined_content[500:1000] if len(combined_content) > 500 else f"Important concepts related to {topic}"
-                ),
-                Section(
-                    title="Detailed Analysis",
-                    description=combined_content[1000:1500] if len(combined_content) > 1000 else f"In-depth analysis of {topic}"
-                ),
-                Section(
-                    title="Applications",
-                    description=f"Practical applications and use cases for {topic}"
-                ),
-                Section(
-                    title="Best Practices",
-                    description=f"Recommended approaches and methodologies for {topic}"
+                    title="Available Information",
+                    description=combined_content[:1000] if combined_content else f"Information about {topic}"
                 )
             ],
-            conclusion=f"This guide provided comprehensive coverage of {topic} including key concepts, applications, and best practices."
+            conclusion=f"This guide provided available information about {topic} based on our knowledge base."
         )
         
-        return fallback_guide.model_dump_json(indent=2)
+        result = fallback_guide.model_dump_json(indent=2)
+        print(f"   📄 Created fallback guide (length: {len(result)})")
+        return result

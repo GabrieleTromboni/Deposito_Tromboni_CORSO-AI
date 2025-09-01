@@ -1,0 +1,18 @@
+{
+  "id": "a42fd3ba-7d11-4070-a47c-8694c546e164",
+  "subject": "medicine",
+  "topic": "cardiology",
+  "full_topic": "medicine - cardiology",
+  "doc_type": "comprehensive_overview",
+  "doc_index": 0,
+  "content": "# Comprehensive Guide to Cardiology\n\nCardiology is a branch of medicine that deals with the study, diagnosis, and treatment of disorders of the heart and blood vessels. It is a critical field of medicine, given the global prevalence of cardiovascular diseases (CVDs), which are the leading cause of death worldwide. This guide provides a detailed overview of cardiology, covering its key concepts, history, current trends, and future outlook.\n\n---\n\n## 1. **Key Definitions and Concepts**\n\n### **Cardiology**\nCardiology is the medical specialty focused on the heart and the circulatory system. It encompasses the diagnosis and treatment of congenital heart defects, coronary artery disease, heart failure, valvular heart disease, and arrhythmias.\n\n### **Key Terms**\n- **Cardiovascular System**: The system comprising the heart and blood vessels that circulates blood throughout the body.\n- **Electrocardiogram (ECG/EKG)**: A test that records the electrical activity of the heart.\n- **Echocardiography**: An imaging technique that uses ultrasound to visualize the heart's structure and function.\n- **Myocardial Infarction (MI)**: Commonly known as a heart attack, it occurs when blood flow to the heart muscle is blocked.\n- **Atherosclerosis**: The buildup of fatty deposits (plaques) in the arteries, leading to reduced blood flow.\n- **Arrhythmia**: An irregular heartbeat, which can be too fast, too slow, or erratic.\n\n### **Subspecialties of Cardiology**\n- **Interventional Cardiology**: Focuses on catheter-based treatments, such as angioplasty and stenting.\n- **Electrophysiology**: Deals with the electrical activities of the heart and arrhythmias.\n- **Pediatric Cardiology**: Specializes in heart conditions in children.\n- **Heart Failure and Transplant Cardiology**: Focuses on advanced heart failure and heart transplantation.\n\n---\n\n## 2. **Historical Background and Development**\n\n### **Ancient Understanding**\n- The earliest understanding of the heart dates back to ancient Egypt and Greece. The Greek physician Hippocrates (460–370 BCE) and later Galen (129–216 CE) described the heart as a central organ of the body, though their understanding was limited.\n\n### **Renaissance and Early Modern Era**\n- In 1628, **William Harvey**, an English physician, revolutionized medicine by describing the circulation of blood and the role of the heart as a pump in his work *De Motu Cordis* (On the Motion of the Heart and Blood).\n- The invention of the stethoscope by **René Laennec** in 1816 marked a significant advancement in diagnosing heart conditions.\n\n### **20th Century Breakthroughs**\n- The development of the electrocardiogram (ECG) by **Willem Einthoven** in 1903 allowed for the non-invasive monitoring of",
+  "estimated_tokens": 514.8000000000001,
+  "generated_at": "2025-09-01T16:55:43.438347",
+  "strategy": "comprehensive_overview",
+  "metadata": {
+    "subject": "medicine",
+    "topic": "cardiology",
+    "doc_type": "comprehensive_overview",
+    "source": "ai_generated"
+  }
+}

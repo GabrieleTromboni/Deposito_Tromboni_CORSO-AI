@@ -14,7 +14,7 @@ class RAGCrew():
     tasks_config : List[Task]
         
     @agent
-    def rag_retriever(self) -> Agent:
+    def database_retriever(self) -> Agent:
         """Agent specialized in retrieving information from the RAG database"""
         return Agent(
             config=self.agents_config['database_retriever'],
@@ -23,7 +23,7 @@ class RAGCrew():
         )
     
     @agent
-    def content_synthesizer(self) -> Agent:
+    def content_reviewer(self) -> Agent:
         """Agent specialized in synthesizing and formatting retrieved information into guides"""
         return Agent(
             config=self.agents_config['content_reviewer'],
@@ -32,20 +32,20 @@ class RAGCrew():
         )
     
     @task
-    def search_rag_database(self) -> Task:
+    def retrieve_info_task(self) -> Task:
         """Task to search the RAG database and retrieve most relevant information"""
         return Task(
             config=self.tasks_config['retrieve_info_task'],
-            agent=self.rag_retriever()
+            agent=self.database_retriever(),
         )
     
     @task
-    def create_guide_from_rag(self) -> Task:
+    def review_response_task(self) -> Task:
         """Task to create a comprehensive guide from retrieved information"""
         return Task(
             config=self.tasks_config['review_response_task'],
-            agent=self.content_synthesizer(),
-            context=[self.search_rag_database()],
+            agent=self.content_reviewer(),
+            context=[self.retrieve_info_task()],
             output_pydantic=GuideOutline
         )
     
@@ -54,12 +54,12 @@ class RAGCrew():
         """Create the RAG crew"""
         return Crew(
             agents=[
-                self.rag_retriever(),
-                self.content_synthesizer()
+                self.database_retriever(),
+                self.content_reviewer()
             ],
             tasks=[
-                self.search_rag_database(),
-                self.create_guide_from_rag()
+                self.retrieve_info_task(),
+                self.review_response_task()
             ],
             process=Process.sequential,
             verbose=True
