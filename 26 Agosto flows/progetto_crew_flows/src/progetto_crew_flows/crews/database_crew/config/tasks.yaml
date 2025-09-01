@@ -21,9 +21,17 @@ create_database_task:
 store_documents_task:
   description: >
     Store the generated documents from generation_documents_task in the RAG database using the store_in_vectordb tool.
-    Take the exact output from the document generation task and pass it as the 'content' parameter to store_in_vectordb.
-    The content should be the JSON list of documents returned by the generate_documents tool.
-    Call store_in_vectordb with the content parameter set to the complete documents list.
+    
+    IMPORTANT: The previous task returned a JSON string containing a list of documents. 
+    You must pass this EXACT JSON string as the 'content' parameter to store_in_vectordb.
+    
+    Example call: store_in_vectordb(content="[{\"topic\": \"medicine - cardiology\", \"content\": \"...\", ...}]")
+    
+    DO NOT modify, parse, or reformat the JSON string from the previous task.
+    DO NOT wrap it in additional dictionaries or structures.
+    Pass it directly as received from the document generation task.
+    
+    Call the tool only ONCE with all documents.
     DO NOT repeat storage for the same documents.
   expected_output: >
     Confirmation message from store_in_vectordb tool that all documents have been successfully stored in the RAG database with chunk count and topic information.

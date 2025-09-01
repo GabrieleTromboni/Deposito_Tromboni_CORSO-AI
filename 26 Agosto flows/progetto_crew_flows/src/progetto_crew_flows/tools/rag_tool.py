@@ -238,32 +238,123 @@ def create_vectordb() -> str:
     return f"Vector database created successfully at {SETTINGS.persist_dir}"
 
 @tool
-def store_in_vectordb(content: str, topic: Optional[str] = None) -> str:
+def store_in_vectordb(**kwargs) -> str:
     """Store generated content in the FAISS vector database for use with WebRAGFlow
     
     Args:
-        content: Either a JSON string containing a list of documents, or plain text content
-        topic: Optional topic name (used only if content is plain text)
+        Accepts any combination of parameters:
+        - content: JSON string, plain text, or dict with content
+        - topic: Optional topic name
+        - Any other parameters passed by CrewAI agent
     
     Returns:
         Success message with details about stored documents
     """
+    
+    print(f"\n🔧 STORE_IN_VECTORDB DEBUG:")
+    print(f"   Kwargs received: {list(kwargs.keys())}")
+    print(f"   Full kwargs: {str(kwargs)[:500]}...")
+    
+    # Extract content from various possible formats
+    actual_content = None
+    topic = kwargs.get('topic')
+    
+    # Try different ways to get the content
+    if 'content' in kwargs:
+        actual_content = kwargs['content']
+        print(f"   Found content in kwargs: {type(actual_content)}")
+    elif len(kwargs) == 1:
+        # If there's only one argument, it might be the content
+        key = list(kwargs.keys())[0]
+        actual_content = kwargs[key]
+        print(f"   Using single arg '{key}' as content: {type(actual_content)}")
+    else:
+        # Maybe the entire kwargs is a wrapped content
+        actual_content = kwargs
+        print(f"   Using entire kwargs as content: {type(actual_content)}")
+    
+    # Handle the case where CrewAI wraps the data in a dict
+    if isinstance(actual_content, dict):
+        print(f"   Content is dict with keys: {list(actual_content.keys())}")
+        if 'content' in actual_content:
+            actual_content = actual_content['content']
+            print(f"   Extracted content from dict, new type: {type(actual_content)}")
+            # Also try to get topic from the dict if not provided
+            if topic is None and 'topic' in kwargs:
+                topic = kwargs['topic']
+                print(f"   Extracted topic from kwargs: {topic}")
+    
+    # Final validation
+    if actual_content is None:
+        return "❌ Error: No content provided to store"
     
     documents = []
     
     # Try to parse content as JSON first (from generate_documents output)
     try:
         import json
-        if isinstance(content, str) and (content.strip().startswith('[') or content.strip().startswith('{')):
-            parsed_content = json.loads(content)
+        
+        # Handle string input
+        if isinstance(actual_content, str):
+            content_str = actual_content.strip()
+            print(f"   Processing as string, starts with: {content_str[:50]}")
             
-            # Handle case where it's wrapped in another dict
-            if isinstance(parsed_content, dict) and 'content' in parsed_content:
-                parsed_content = parsed_content['content']
+            # Try to parse as JSON
+            if content_str.startswith('[') or content_str.startswith('{'):
+                parsed_content = json.loads(content_str)
+                print(f"   Successfully parsed JSON, type: {type(parsed_content)}")
+                
+                # Handle case where it's wrapped in another dict
+                if isinstance(parsed_content, dict) and 'content' in parsed_content:
+                    parsed_content = parsed_content['content']
+                    print(f"   Unwrapped content, new type: {type(parsed_content)}")
+                
+                # Handle list of documents
+                if isinstance(parsed_content, list):
+                    print(f"   Processing {len(parsed_content)} documents from list")
+                    for i, item in enumerate(parsed_content):
+                        if isinstance(item, dict) and 'content' in item:
+                            # Create metadata with string conversion for compatibility
+                            metadata = {
+                                "topic": str(item.get("topic", topic or "unknown")),
+                                "source": str(item.get("source", "generated"))
+                            }
+                            # Add additional metadata fields if present, converting to strings
+                            for key, value in item.items():
+                                if key not in ["content", "topic", "source"]:
+                                    metadata[key] = str(value)
+                                    
+                            doc = Document(
+                                page_content=item.get("content", ""),
+                                metadata=metadata
+                            )
+                            documents.append(doc)
+                            print(f"     ✓ Document {i+1}: topic={metadata['topic']}, length={len(item.get('content', ''))}")
+                else:
+                    # Single document as dict
+                    if isinstance(parsed_content, dict) and 'content' in parsed_content:
+                        metadata = {
+                            "topic": str(parsed_content.get("topic", topic or "unknown")),
+                            "source": str(parsed_content.get("source", "generated"))
+                        }
+                        doc = Document(
+                            page_content=parsed_content.get("content", ""),
+                            metadata=metadata
+                        )
+                        documents.append(doc)
+                        print(f"   ✓ Single document: topic={metadata['topic']}")
+            else:
+                print(f"   Content doesn't start with JSON markers, treating as plain text")
+                raise ValueError("Not JSON format")
+        
+        # Handle case where actual_content is already a parsed list/dict
+        elif isinstance(actual_content, (list, dict)):
+            print(f"   Content is already parsed: {type(actual_content)}")
+            parsed_content = actual_content
             
-            # Handle list of documents
             if isinstance(parsed_content, list):
-                for item in parsed_content:
+                print(f"   Processing {len(parsed_content)} documents from list")
+                for i, item in enumerate(parsed_content):
                     if isinstance(item, dict) and 'content' in item:
                         # Create metadata with string conversion for compatibility
                         metadata = {
@@ -280,32 +371,38 @@ def store_in_vectordb(content: str, topic: Optional[str] = None) -> str:
                             metadata=metadata
                         )
                         documents.append(doc)
-            else:
-                # Single document as dict
-                if isinstance(parsed_content, dict) and 'content' in parsed_content:
-                    metadata = {
-                        "topic": str(parsed_content.get("topic", topic or "unknown")),
-                        "source": str(parsed_content.get("source", "generated"))
-                    }
-                    doc = Document(
-                        page_content=parsed_content.get("content", ""),
-                        metadata=metadata
-                    )
-                    documents.append(doc)
-    except (json.JSONDecodeError, ValueError):
+                        print(f"     ✓ Document {i+1}: topic={metadata['topic']}, length={len(item.get('content', ''))}")
+            elif isinstance(parsed_content, dict) and 'content' in parsed_content:
+                metadata = {
+                    "topic": str(parsed_content.get("topic", topic or "unknown")),
+                    "source": str(parsed_content.get("source", "generated"))
+                }
+                doc = Document(
+                    page_content=parsed_content.get("content", ""),
+                    metadata=metadata
+                )
+                documents.append(doc)
+                print(f"   ✓ Single document: topic={metadata['topic']}")
+                
+    except (json.JSONDecodeError, ValueError) as e:
         # Content is not JSON, treat as plain text
+        print(f"   JSON parsing failed: {e}")
+        print(f"   Treating as plain text content")
         pass
     
     # If no documents were parsed from JSON, treat as plain text
     if not documents:
+        print(f"   Creating document from plain text (length: {len(str(actual_content))})")
         doc = Document(
-            page_content=str(content),
+            page_content=str(actual_content),
             metadata={"topic": topic or "general", "source": f"generated_{topic or 'content'}.md"}
         )
         documents.append(doc)
     
     if not documents:
-        return "Error: No valid documents found to store"
+        return "❌ Error: No valid documents found to store"
+    
+    print(f"   📄 Total documents to process: {len(documents)}")
     
     # Split documents into chunks
     splitter = RecursiveCharacterTextSplitter(
@@ -313,29 +410,41 @@ def store_in_vectordb(content: str, topic: Optional[str] = None) -> str:
         chunk_overlap=SETTINGS.chunk_overlap
     )
     chunks = splitter.split_documents(documents)
+    print(f"   🔪 Split into {len(chunks)} chunks")
     
     # Load or create vector store
     persist_dir = SETTINGS.persist_dir
     try:
         if Path(persist_dir).exists() and Path(persist_dir, "index.faiss").exists():
+            print(f"   📚 Loading existing vector store from {persist_dir}")
             vector_store = FAISS.load_local(
                 persist_dir,
                 EMBEDDINGS,
                 allow_dangerous_deserialization=True
             )
             vector_store.add_documents(chunks)
+            print(f"   ➕ Added {len(chunks)} chunks to existing store")
         else:
+            print(f"   🆕 Creating new vector store at {persist_dir}")
             Path(persist_dir).mkdir(parents=True, exist_ok=True)
             vector_store = FAISS.from_documents(chunks, EMBEDDINGS)
+            print(f"   ✅ Created new store with {len(chunks)} chunks")
 
         # Save vector store
         vector_store.save_local(persist_dir)
+        print(f"   💾 Saved vector store successfully")
         
         topics_stored = set([doc.metadata.get("topic", "unknown") for doc in documents])
-        return f"Successfully stored {len(chunks)} chunks from {len(documents)} documents for topics: {', '.join(topics_stored)}"
+        result = f"✅ Successfully stored {len(chunks)} chunks from {len(documents)} documents for topics: {', '.join(topics_stored)}"
+        print(f"   🎉 {result}")
+        return result
     
     except Exception as e:
-        return f"Error storing documents in vector database: {str(e)}"
+        error_msg = f"❌ Error storing documents in vector database: {str(e)}"
+        print(f"   {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return error_msg
     vector_store.save_local(persist_dir)
     
     topics_stored = set([doc.metadata.get("topic", "unknown") for doc in documents])

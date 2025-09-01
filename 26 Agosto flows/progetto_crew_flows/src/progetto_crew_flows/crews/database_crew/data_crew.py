@@ -4,7 +4,6 @@ from typing import Dict, List
 import os
 import sys
 from pathlib import Path
-import os
 
 # Fix the import path for tools
 project_root = Path(__file__).parent.parent.parent
@@ -104,7 +103,7 @@ class DatabaseCrew():
             verbose=True
         )
     
-    def kickoff(self, subjects: Dict[str, List[str]] = None, docs_per_topic: int = 1, max_tokens_per_doc: int = 800, batch_size: int = 3):
+    def kickoff(self, subjects: Dict[str, List[str]] = None, docs_per_topic: int = 1, max_tokens_per_doc: int = 600, batch_size: int = 3):
         """Initialize database with all subjects and topics with optimized document generation and rate limiting
         
         Args:

@@ -93,7 +93,7 @@ def main():
             print(f"\nProcessing query: '{query}'")
             print("-" * 40)
             
-            result = flow.kickoff(query)
+            result = flow.kickoff(inputs={"query": query})
             
             # Display processing details
             print(f"\nExtracted Subject: {result.subject}")

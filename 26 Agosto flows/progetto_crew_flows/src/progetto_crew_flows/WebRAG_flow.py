@@ -65,8 +65,24 @@ class WebRAGFlow(Flow[GuideCreatorState]):
         )
     
     @start()
-    def extraction(self, query: str) -> GuideCreatorState:
+    def extraction(self, query: str = None) -> GuideCreatorState:
         """First step: Extract subject and topic from user query"""
+        
+        # Handle different input formats
+        if query is None:
+            raise ValueError("No query provided to the flow. Please provide a query parameter.")
+        
+        print(f"🔍 Extracting from query: {query}")
+        print(f"🔍 Query type: {type(query)}")
+        print(f"🔍 Query length: {len(str(query))}")
+        
+        # Ensure we have a valid string query
+        query_str = str(query).strip()
+        if not query_str:
+            raise ValueError("Empty query provided to the flow")
+        
+        print(f"🔍 Processing query: {query_str}")
+        
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are an expert at extracting subjects and topics from queries.
             Available subjects are: {subjects}
@@ -78,7 +94,7 @@ class WebRAGFlow(Flow[GuideCreatorState]):
         
         chain = prompt | self.llm | StrOutputParser()
         extracted = chain.invoke({
-            "query": query,
+            "query": query_str,
             "subjects": ", ".join(self.SUBJECTS.keys())
         })
         
@@ -89,7 +105,7 @@ class WebRAGFlow(Flow[GuideCreatorState]):
         
         # Initialize GuideCreatorState
         state = GuideCreatorState(
-            query=query,
+            query=query_str,
             subject=subject,
             topic=topic,
             audience_level="general"  # Default audience level
