@@ -14,6 +14,23 @@ from dataclasses import dataclass
 from progetto_crew_flows.models import GuideOutline, Section
 import uuid
 from datetime import datetime
+# Qdrant vector database client and models
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    Distance,
+    VectorParams,
+    HnswConfigDiff,
+    OptimizersConfigDiff,
+    ScalarQuantization,
+    ScalarQuantizationConfig,
+    PayloadSchemaType,
+    FieldCondition,
+    MatchValue,
+    MatchText,
+    Filter,
+    SearchParams,
+    PointStruct,
+)
 
 # Import SSL configuration
 try:
@@ -38,7 +55,22 @@ class Settings:
     fetch_k: int = 10
     mmr_lambda: float = 0.4
 
-SETTINGS = Settings()
+@dataclass
+# Class di setting degli iperparametri per utilizzo di Qdrant
+class QdrantSetting:
+    qdrant_url: str = os.getenv("QDRANT_URL")
+    collection: str = os.getenv("QDRANT_COLLECTION")
+    chunk_size: int = 800
+    chunk_overlap: int = 100
+    top_n_semantic: int = 30
+    top_n_text: int = 100
+    final_k: int = 6
+    alpha: float = 0.75
+    text_boost: float = 0.2
+    use_mmr: bool = True
+    mmr_lambda: float = 0.6
+
+SETTINGS = QdrantSetting()
 
 # Azure OpenAI configuration
 API_VERSION = os.getenv("AZURE_API_VERSION")
@@ -332,6 +364,102 @@ Focus on depth and specificity for {topic}.""",
         "topics_processed": len(topics),
         "docs_per_topic": docs_per_topic
     }, ensure_ascii=False, indent=2)
+
+
+def get_qdrant_client(settings: Settings) -> QdrantClient:
+    return QdrantClient(url=settings.qdrant_url)
+ 
+def recreate_collection_for_rag(client: QdrantClient, settings: Settings, vector_size: int):
+    """
+    Create or recreate a Qdrant collection optimized for RAG (Retrieval-Augmented Generation).
+   
+    This function sets up a vector database collection with optimal configuration for
+    semantic search, including HNSW indexing, payload indexing, and quantization.
+   
+    Args:
+        client: Qdrant client instance for database operations
+        settings: Configuration object containing collection parameters
+        vector_size: Dimension of the embedding vectors (e.g., 384 for MiniLM-L6)
+       
+    Collection Architecture:
+    - Vector storage: Dense vectors for semantic similarity search
+    - Payload storage: Metadata and text content for retrieval
+    - Indexing: HNSW for approximate nearest neighbor search
+    - Quantization: Scalar quantization for memory optimization
+       
+    Distance Metric Selection:
+    - Cosine distance: Normalized similarity, good for semantic embeddings
+    - Alternatives: Euclidean (L2), Manhattan (L1), Dot product
+    - Cosine preferred for normalized embeddings (sentence-transformers)
+       
+    HNSW Index Configuration:
+    - m=32: Average connections per node (higher = better quality, more memory)
+    - ef_construct=256: Search depth during construction (higher = better quality, slower build)
+    - Trade-offs: Higher values improve recall but increase memory and build time
+       
+    Optimizer Configuration:
+    - default_segment_number=2: Parallel processing segments
+    - Benefits: Faster indexing, better resource utilization
+    - Considerations: More segments = more memory overhead
+       
+    Quantization Strategy:
+    - Scalar quantization: Reduces vector precision from float32 to int8
+    - Memory savings: ~4x reduction in vector storage
+    - Quality impact: Minimal impact on search accuracy
+    - always_ram=False: Vectors stored on disk, loaded to RAM as needed
+       
+    Payload Indexing Strategy:
+    - Text index: Full-text search capabilities (BM25 scoring)
+    - Keyword indices: Fast exact matching and filtering
+    - Performance: Significantly faster than unindexed field searches
+       
+    Collection Lifecycle:
+    - recreate_collection: Drops existing collection and creates new one
+    - Use case: Development/testing, major schema changes
+    - Production: Consider using create_collection + update_collection_info
+       
+    Performance Considerations:
+    - Build time: HNSW construction scales with collection size
+    - Memory usage: Vectors loaded to RAM during search
+    - Storage: Quantized vectors + payload data
+    - Query latency: HNSW provides sub-millisecond search times
+       
+    Scaling Guidelines:
+    - Small collections (<100K vectors): Current settings optimal
+    - Medium collections (100K-1M vectors): Increase m to 48-64
+    - Large collections (1M+ vectors): Consider multiple collections or sharding
+    """
+    client.recreate_collection(
+        collection_name=settings.collection,
+        vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+        hnsw_config=HnswConfigDiff(
+            m=32,             # grado medio del grafo HNSW (maggiore = più memoria/qualità)
+            ef_construct=256  # ampiezza lista candidati in fase costruzione (qualità/tempo build)
+        ),
+        optimizers_config=OptimizersConfigDiff(
+            default_segment_number=2  # parallelismo/segmentazione iniziale
+        ),
+        quantization_config=ScalarQuantization(
+            scalar=ScalarQuantizationConfig(type="int8", always_ram=False)  # on-disk quantization dei vettori
+        ),
+    )
+ 
+    # Indice full-text sul campo 'text' per filtri MatchText
+    client.create_payload_index(
+        collection_name=settings.collection,
+        field_name="text",
+        field_schema=PayloadSchemaType.TEXT
+    )
+ 
+    # Indici keyword per filtri esatti / velocità nei filtri
+    for key in ["doc_id", "source", "title", "lang"]:
+        client.create_payload_index(
+            collection_name=settings.collection,
+            field_name=key,
+            field_schema=PayloadSchemaType.KEYWORD
+        )
+@tool
+def create_qdrant_collection
 
 @tool
 def create_vectordb() -> str:
