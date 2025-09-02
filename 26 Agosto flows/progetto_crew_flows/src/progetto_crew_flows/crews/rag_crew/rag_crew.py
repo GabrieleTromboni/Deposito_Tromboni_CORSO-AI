@@ -1,7 +1,14 @@
 from crewai import Agent, Task, Crew, Process
 from crewai.project import CrewBase, agent, task, crew
 from crewai.agents.agent_builder.base_agent import BaseAgent
-from progetto_crew_flows.tools.rag_tool import retrieve_from_vectordb, format_content_as_guide
+from progetto_crew_flows.tools.rag_tool import (
+    retrieve_from_vectordb, 
+    format_content_as_guide,
+    intelligent_rag_search,
+    qdrant_hybrid_search,
+    qdrant_semantic_search,
+    qdrant_text_search
+)
 from progetto_crew_flows.models import GuideOutline
 import json
 from typing import List
@@ -15,10 +22,16 @@ class RAGCrew():
         
     @agent
     def database_retriever(self) -> Agent:
-        """Agent specialized in retrieving information from the RAG database"""
+        """Agent specialized in retrieving information from RAG databases (FAISS and Qdrant)"""
         return Agent(
             config=self.agents_config['database_retriever'],
-            tools=[retrieve_from_vectordb],
+            tools=[
+                intelligent_rag_search,  # Primary intelligent search tool
+                qdrant_hybrid_search,    # Hybrid semantic + text search
+                qdrant_semantic_search,  # Pure semantic search
+                qdrant_text_search,      # Pure text-based search
+                retrieve_from_vectordb   # Fallback FAISS search
+            ],
             verbose=True
         )
     
@@ -80,15 +93,50 @@ class RAGCrew():
         
         return step
     
+    def _detect_available_databases(self):
+        """Detect which databases are available and configured"""
+        available_dbs = []
+        
+        # Check Qdrant availability
+        try:
+            from progetto_crew_flows.tools.rag_tool import SETTINGS, get_qdrant_client, safe_embeddings_check
+            if SETTINGS.qdrant_url and SETTINGS.persist_dir and safe_embeddings_check():
+                client = get_qdrant_client(SETTINGS)
+                collections = client.get_collections()
+                if any(col.name == SETTINGS.persist_dir for col in collections.collections):
+                    available_dbs.append("qdrant")
+                    print(f"   ✅ Qdrant available: {SETTINGS.qdrant_url}/{SETTINGS.persist_dir}")
+        except Exception as e:
+            print(f"   ⚠️ Qdrant not available: {e}")
+        
+        # Check FAISS availability
+        try:
+            from pathlib import Path
+            from progetto_crew_flows.tools.rag_tool import SETTINGS
+            faiss_path = Path(SETTINGS.persist_dir) / "index.faiss"
+            if faiss_path.exists():
+                available_dbs.append("faiss")
+                print(f"   ✅ FAISS available: {faiss_path}")
+        except Exception as e:
+            print(f"   ⚠️ FAISS not available: {e}")
+        
+        return available_dbs
+    
     def kickoff(self, inputs: dict):
-        """Execute the crew with proper input handling"""
+        """Execute the crew with proper input handling and database detection"""
         print(f"🚀 RAGCrew.kickoff called with inputs: {inputs}")
+        
+        # Detect available databases
+        available_dbs = self._detect_available_databases()
+        print(f"🗄️ Available databases: {available_dbs}")
         
         # Ensure all required inputs are present
         formatted_inputs = {
             "query": inputs.get("query", ""),
             "topic": inputs.get("topic", ""),
-            "subject": inputs.get("subject", "")
+            "subject": inputs.get("subject", ""),
+            "available_databases": available_dbs,
+            "preferred_search": "intelligent_rag_search" if "qdrant" in available_dbs else "retrieve_from_vectordb"
         }
         
         print(f"🔧 Formatted inputs for crew: {formatted_inputs}")
@@ -158,6 +206,7 @@ class RAGCrew():
                     print("✅ Successfully created GuideOutline from JSON")
                     print(f"📊 Guide title: {final_result.title}")
                     print(f"📊 Guide sections: {len(final_result.sections)}")
+                    print(f"📊 Used databases: {available_dbs}")
                     return final_result
                     
                 except json.JSONDecodeError as json_error:

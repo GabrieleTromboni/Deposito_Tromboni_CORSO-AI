@@ -1,37 +1,64 @@
 retrieve_info_task:
   description: > 
-    Use the retrieve_from_vectordb tool to search for information about "{topic}" based on the query: "{query}".
+    Intelligently retrieve information about "{topic}" for the query: "{query}" using the most appropriate search strategy.
     
-    Call the tool with these exact parameters:
+    Available databases: {available_databases}
+    Preferred search approach: {preferred_search}
+    
+    Strategy Selection:
+    1. If Qdrant is available, use intelligent_rag_search (auto-selects optimal approach)
+    2. For manual control, choose from: qdrant_hybrid_search, qdrant_semantic_search, qdrant_text_search
+    3. Fallback to retrieve_from_vectordb for FAISS-only setups
+    
+    Call your chosen tool with these parameters:
     - query: "{query}"
-    - topic: "{topic}"
+    - topic: "{topic}" 
     - subject: "{subject}"
+    - k: 6 (for Qdrant tools)
+    - limit: 12 (for FAISS/semantic tools)
     
-    The tool will return structured text with documents from the RAG database.
+    Tool Selection Logic:
+    - Complex analytical queries → intelligent_rag_search (auto-strategy)
+    - Need both semantic + text → qdrant_hybrid_search  
+    - Conceptual understanding → qdrant_semantic_search
+    - Specific facts/terms → qdrant_text_search
+    - FAISS only → retrieve_from_vectordb
     
-    IMPORTANT: Simply return the tool output as your task result. Do not modify, summarize, or interpret it.
-    The next agent will handle the formatting.
+    Return the tool output directly - the next agent will format it into a guide.
   expected_output: >
-    The exact structured text output from the retrieve_from_vectordb tool containing all retrieved documents.
-    Return this output without any modifications or additional commentary.
+    Complete search results from the selected tool, either as:
+    - JSON response (Qdrant tools) with documents array and metadata
+    - Structured text (FAISS) with document blocks
+    Do not modify or interpret the results.
   agent: database_retriever
 
 review_response_task:
   description: >
-    Take the retrieved information from the previous task and use the format_content_as_guide tool to create a comprehensive guide.
+    Transform the retrieved information into a comprehensive GuideOutline using format_content_as_guide.
     
-    The previous task has retrieved structured document data from the RAG database. This data is available as context.
+    Input Analysis:
+    The previous task retrieved information in one of these formats:
+    - Qdrant JSON: {"status": "success", "documents": [...], "search_type": "...", ...}
+    - FAISS text: "--- DOCUMENT 1 ---\nContent: ...\nSubject: ...\n..."
+    - Error responses: {"status": "error", "message": "..."}
     
-    You must call the format_content_as_guide tool with these exact parameters:
-    - retrieved_info: The complete output from the previous retrieval task (passed automatically as context)
-    - query: "{query}"
-    - topic: "{topic}" 
-    - subject: "{subject}"
+    Process:
+    1. Take the complete context from the previous retrieval task
+    2. Call format_content_as_guide with exact parameters:
+       - retrieved_info: [Complete previous task output]
+       - query: "{query}"
+       - topic: "{topic}"
+       - subject: "{subject}"
     
-    IMPORTANT: 
-    1. Use the context from the previous task as retrieved_info parameter
-    2. Return only the clean JSON output from the tool
-    3. Remove any markdown formatting like ```json
+    The tool will handle format detection and create appropriate GuideOutline JSON.
+    
+    CRITICAL OUTPUT REQUIREMENTS:
+    - Return ONLY the clean JSON from the tool
+    - No markdown formatting (```json)
+    - No additional commentary or explanation
+    - No wrapper text
+    - Pure JSON starting with {{ and ending with }}
   expected_output: >
-    Clean JSON string representing a GuideOutline object without any markdown formatting or extra characters.
+    Clean JSON string representing a complete GuideOutline object with title, introduction, 
+    target_audience, sections array, and conclusion. No markdown or extra formatting.
   agent: content_reviewer

@@ -840,6 +840,8 @@ def store_individual_documents() -> str:
     }, ensure_ascii=False, indent=2)
 
 # Keep existing retrieve function
+#FAISS Retrieve
+
 @tool
 def retrieve_from_vectordb(query: str, topic: Optional[str] = None, subject: Optional[str] = None, k: int = 5) -> str:
     """Retrieve information from the vector database and return structured content"""
@@ -960,6 +962,708 @@ def retrieve_from_vectordb(query: str, topic: Optional[str] = None, subject: Opt
         "total_documents": len(docs),
         "search_query": search_query
     }, ensure_ascii=False, indent=2)
+
+# =========================
+# QDRANT SEARCH TOOLS - Enhanced and Unified
+# =========================
+
+# Internal implementation functions (not decorated)
+def _qdrant_semantic_search_impl(query: str, limit: int = 30, topic: Optional[str] = None, subject: Optional[str] = None) -> str:
+    """Internal implementation for semantic search on Qdrant database"""
+    
+    print(f"\n🔍 QDRANT_SEMANTIC_SEARCH:")
+    
+    # Normalize inputs
+    query = normalize_input(query)
+    topic = normalize_input(topic)
+    subject = normalize_input(subject)
+    
+    print(f"   Query: {query}")
+    print(f"   Topic: {topic}")
+    print(f"   Subject: {subject}")
+    print(f"   Limit: {limit}")
+    
+    # Validate inputs
+    if not query or query.strip() == "":
+        return "ERROR: Query cannot be empty"
+    
+    # Check configuration
+    settings = SETTINGS
+    if not settings.qdrant_url or not settings.persist_dir:
+        return "ERROR: Qdrant not configured. Check QDRANT_URL and QDRANT_COLLECTION environment variables."
+    
+    # Check embeddings availability
+    if not safe_embeddings_check():
+        return "ERROR: Azure OpenAI embeddings not available"
+    
+    try:
+        # Connect to Qdrant
+        client = get_qdrant_client(settings)
+        print(f"   📡 Connected to Qdrant collection: {settings.persist_dir}")
+        
+        # Build search query with context
+        if subject and topic:
+            search_query = f"{subject} {topic} {query}"
+        elif topic:
+            search_query = f"{topic} {query}"
+        else:
+            search_query = query
+        
+        print(f"   🔎 Search query: '{search_query}'")
+        
+        # Generate query embedding
+        qv = EMBEDDINGS.embed_query(search_query)
+        
+        # Perform semantic search
+        res = client.query_points(
+            collection_name=settings.persist_dir,
+            query=qv,
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+            search_params=SearchParams(
+                hnsw_ef=256,  # ampiezza lista in fase di ricerca (recall/latency)
+                exact=False   # True = ricerca esatta (lenta); False = ANN HNSW
+            ),
+        )
+        
+        print(f"   📊 Found {len(res.points)} semantic results")
+        
+        if not res.points:
+            return json.dumps({
+                "status": "no_results",
+                "message": f"No semantic results found for query: {search_query}",
+                "query": query,
+                "search_query": search_query
+            }, ensure_ascii=False, indent=2)
+        
+        # Format results for RAG crew
+        documents_list = []
+        for i, point in enumerate(res.points):
+            doc_dict = {
+                "content": point.payload.get("content", ""),
+                "score": float(point.score),
+                "search_type": "semantic",
+                "point_id": point.id
+            }
+            
+            # Add metadata if available
+            if "subject" in point.payload:
+                doc_dict["subject"] = point.payload["subject"]
+            if "topic" in point.payload:
+                doc_dict["topic"] = point.payload["topic"]
+            if "doc_type" in point.payload:
+                doc_dict["doc_type"] = point.payload["doc_type"]
+            if "source" in point.payload:
+                doc_dict["source"] = point.payload["source"]
+            
+            documents_list.append(doc_dict)
+        
+        print(f"   ✅ Returning {len(documents_list)} semantic results")
+        
+        return json.dumps({
+            "status": "success",
+            "search_type": "semantic",
+            "documents": documents_list,
+            "query": query,
+            "topic": topic,
+            "subject": subject,
+            "total_documents": len(documents_list),
+            "search_query": search_query
+        }, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        print(f"   ❌ Semantic search error: {e}")
+        return json.dumps({
+            "status": "error",
+            "search_type": "semantic",
+            "message": f"Semantic search failed: {str(e)}",
+            "query": query
+        }, ensure_ascii=False, indent=2)
+
+def _qdrant_text_search_impl(query: str, limit: int = 100, topic: Optional[str] = None, subject: Optional[str] = None) -> str:
+    """Internal implementation for text-based search on Qdrant database"""
+    
+    print(f"\n🔍 QDRANT_TEXT_SEARCH:")
+    
+    # Normalize inputs
+    query = normalize_input(query)
+    topic = normalize_input(topic)
+    subject = normalize_input(subject)
+    
+    print(f"   Query: {query}")
+    print(f"   Topic: {topic}")
+    print(f"   Subject: {subject}")
+    print(f"   Limit: {limit}")
+    
+    # Validate inputs
+    if not query or query.strip() == "":
+        return "ERROR: Query cannot be empty"
+    
+    # Check configuration
+    settings = SETTINGS
+    if not settings.qdrant_url or not settings.persist_dir:
+        return "ERROR: Qdrant not configured. Check QDRANT_URL and QDRANT_COLLECTION environment variables."
+    
+    try:
+        # Connect to Qdrant
+        client = get_qdrant_client(settings)
+        print(f"   📡 Connected to Qdrant collection: {settings.persist_dir}")
+        
+        # Build search query with context
+        if subject and topic:
+            search_query = f"{subject} {topic} {query}"
+        elif topic:
+            search_query = f"{topic} {query}"
+        else:
+            search_query = query
+        
+        print(f"   🔎 Text search query: '{search_query}'")
+        
+        # Perform text-based search using scroll with MatchText filter
+        matched_points = []
+        next_page = None
+        
+        while len(matched_points) < limit:
+            points, next_page = client.scroll(
+                collection_name=settings.persist_dir,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="content", match=MatchText(text=search_query))]
+                ),
+                limit=min(100, limit - len(matched_points)),
+                offset=next_page,
+                with_payload=True,
+                with_vectors=False,
+            )
+            
+            matched_points.extend(points)
+            
+            if not next_page or len(matched_points) >= limit:
+                break
+        
+        print(f"   📊 Found {len(matched_points)} text-based results")
+        
+        if not matched_points:
+            return json.dumps({
+                "status": "no_results",
+                "message": f"No text results found for query: {search_query}",
+                "query": query,
+                "search_query": search_query
+            }, ensure_ascii=False, indent=2)
+        
+        # Format results for RAG crew (simulate scores for text matches)
+        documents_list = []
+        for i, point in enumerate(matched_points[:limit]):
+            # Create a pseudo-score based on text relevance (simple heuristic)
+            content = point.payload.get("content", "")
+            query_words = search_query.lower().split()
+            content_words = content.lower().split()
+            matches = sum(1 for word in query_words if word in content_words)
+            pseudo_score = min(0.95, matches / max(len(query_words), 1))
+            
+            doc_dict = {
+                "content": content,
+                "score": pseudo_score,
+                "search_type": "text",
+                "point_id": point.id
+            }
+            
+            # Add metadata if available
+            if "subject" in point.payload:
+                doc_dict["subject"] = point.payload["subject"]
+            if "topic" in point.payload:
+                doc_dict["topic"] = point.payload["topic"]
+            if "doc_type" in point.payload:
+                doc_dict["doc_type"] = point.payload["doc_type"]
+            if "source" in point.payload:
+                doc_dict["source"] = point.payload["source"]
+            
+            documents_list.append(doc_dict)
+        
+        # Sort by pseudo-score descending
+        documents_list.sort(key=lambda x: x["score"], reverse=True)
+        
+        print(f"   ✅ Returning {len(documents_list)} text-based results")
+        
+        return json.dumps({
+            "status": "success",
+            "search_type": "text",
+            "documents": documents_list,
+            "query": query,
+            "topic": topic,
+            "subject": subject,
+            "total_documents": len(documents_list),
+            "search_query": search_query
+        }, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        print(f"   ❌ Text search error: {e}")
+        return json.dumps({
+            "status": "error",
+            "search_type": "text",
+            "message": f"Text search failed: {str(e)}",
+            "query": query
+        }, ensure_ascii=False, indent=2)
+
+def _qdrant_hybrid_search_impl(query: str, k: int = 6, topic: Optional[str] = None, subject: Optional[str] = None) -> str:
+    """Internal implementation for intelligent hybrid search"""
+    
+    print(f"\n🔍 QDRANT_HYBRID_SEARCH:")
+    
+    # Normalize inputs
+    query = normalize_input(query)
+    topic = normalize_input(topic)
+    subject = normalize_input(subject)
+    
+    print(f"   Query: {query}")
+    print(f"   Topic: {topic}")
+    print(f"   Subject: {subject}")
+    print(f"   K: {k}")
+    
+    # Validate inputs
+    if not query or query.strip() == "":
+        return "ERROR: Query cannot be empty"
+    
+    # Check configuration
+    settings = SETTINGS
+    if not settings.qdrant_url or not settings.persist_dir:
+        return "ERROR: Qdrant not configured. Check QDRANT_URL and QDRANT_COLLECTION environment variables."
+    
+    # Check embeddings availability
+    if not safe_embeddings_check():
+        return "ERROR: Azure OpenAI embeddings not available"
+    
+    try:
+        # Connect to Qdrant
+        client = get_qdrant_client(settings)
+        print(f"   📡 Connected to Qdrant collection: {settings.persist_dir}")
+        
+        # Build search query with context
+        if subject and topic:
+            search_query = f"{subject} {topic} {query}"
+        elif topic:
+            search_query = f"{topic} {query}"
+        else:
+            search_query = query
+        
+        print(f"   🔎 Hybrid search query: '{search_query}'")
+        
+        # Phase 1: Semantic Search
+        qv = EMBEDDINGS.embed_query(search_query)
+        semantic_results = client.query_points(
+            collection_name=settings.persist_dir,
+            query=qv,
+            limit=settings.top_n_semantic,
+            with_payload=True,
+            with_vectors=True,
+            search_params=SearchParams(
+                hnsw_ef=256,
+                exact=False
+            ),
+        )
+        
+        print(f"   📊 Semantic phase: {len(semantic_results.points)} results")
+        
+        if not semantic_results.points:
+            return json.dumps({
+                "status": "no_results",
+                "message": f"No semantic results found for query: {search_query}",
+                "query": query,
+                "search_query": search_query,
+                "search_type": "hybrid"
+            }, ensure_ascii=False, indent=2)
+        
+        # Phase 2: Text-based pre-filtering
+        text_ids = set()
+        next_page = None
+        while len(text_ids) < settings.top_n_text:
+            points, next_page = client.scroll(
+                collection_name=settings.persist_dir,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="content", match=MatchText(text=search_query))]
+                ),
+                limit=min(100, settings.top_n_text - len(text_ids)),
+                offset=next_page,
+                with_payload=False,
+                with_vectors=False,
+            )
+            text_ids.update([p.id for p in points])
+            if not next_page or len(text_ids) >= settings.top_n_text:
+                break
+        
+        print(f"   📊 Text phase: {len(text_ids)} matching IDs")
+        
+        # Phase 3: Score Fusion and Ranking
+        # Normalize semantic scores
+        semantic_scores = [p.score for p in semantic_results.points]
+        if semantic_scores:
+            smin, smax = min(semantic_scores), max(semantic_scores)
+            def normalize_score(x):
+                return 1.0 if smax == smin else (x - smin) / (smax - smin)
+        else:
+            def normalize_score(x):
+                return 0.0
+        
+        # Combine scores using hybrid fusion
+        hybrid_results = []
+        for point in semantic_results.points:
+            # Normalized semantic score
+            norm_semantic = normalize_score(point.score)
+            
+            # Text relevance boost
+            text_match = 1.0 if point.id in text_ids else 0.0
+            
+            # Hybrid score calculation: alpha * semantic + text_boost * text_match
+            hybrid_score = (settings.alpha * norm_semantic + 
+                          settings.text_boost * text_match)
+            
+            hybrid_results.append((point, hybrid_score, text_match > 0))
+        
+        # Sort by hybrid score
+        hybrid_results.sort(key=lambda x: x[1], reverse=True)
+        
+        print(f"   📊 Hybrid fusion completed, top score: {hybrid_results[0][1]:.3f}")
+        
+        # Phase 4: MMR Diversification (if enabled)
+        if settings.use_mmr and len(hybrid_results) > k:
+            # Extract vectors and scores for MMR
+            candidates_vectors = [result[0].vector for result in hybrid_results]
+            
+            # Apply MMR selection
+            selected_indices = mmr_select(
+                query_vec=qv,
+                candidates_vecs=candidates_vectors,
+                k=k,
+                lambda_mult=settings.mmr_lambda
+            )
+            
+            final_results = [hybrid_results[i] for i in selected_indices]
+            print(f"   🎯 MMR diversification: selected {len(final_results)} diverse results")
+        else:
+            final_results = hybrid_results[:k]
+            print(f"   📝 Top-K selection: selected {len(final_results)} results")
+        
+        # Phase 5: Format results for RAG crew
+        documents_list = []
+        for point, hybrid_score, has_text_match in final_results:
+            doc_dict = {
+                "content": point.payload.get("content", ""),
+                "score": float(hybrid_score),
+                "semantic_score": float(normalize_score(point.score)),
+                "text_match": has_text_match,
+                "search_type": "hybrid",
+                "point_id": point.id
+            }
+            
+            # Add metadata if available
+            for key in ["subject", "topic", "doc_type", "source"]:
+                if key in point.payload:
+                    doc_dict[key] = point.payload[key]
+            
+            documents_list.append(doc_dict)
+        
+        print(f"   ✅ Returning {len(documents_list)} hybrid results")
+        
+        return json.dumps({
+            "status": "success",
+            "search_type": "hybrid",
+            "documents": documents_list,
+            "query": query,
+            "topic": topic,
+            "subject": subject,
+            "total_documents": len(documents_list),
+            "search_query": search_query,
+            "semantic_candidates": len(semantic_results.points),
+            "text_matches": len(text_ids),
+            "mmr_enabled": settings.use_mmr,
+            "fusion_settings": {
+                "alpha": settings.alpha,
+                "text_boost": settings.text_boost,
+                "mmr_lambda": settings.mmr_lambda if settings.use_mmr else None
+            }
+        }, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        print(f"   ❌ Hybrid search error: {e}")
+        return json.dumps({
+            "status": "error",
+            "search_type": "hybrid",
+            "message": f"Hybrid search failed: {str(e)}",
+            "query": query
+        }, ensure_ascii=False, indent=2)
+
+# Tool decorators (use internal implementations)
+@tool
+def qdrant_semantic_search(query: str, limit: int = 30, topic: Optional[str] = None, subject: Optional[str] = None) -> str:
+    """Perform semantic search on Qdrant database using vector similarity"""
+    return _qdrant_semantic_search_impl(query, limit, topic, subject)
+
+@tool
+def qdrant_text_search(query: str, limit: int = 100, topic: Optional[str] = None, subject: Optional[str] = None) -> str:
+    """Perform text-based search on Qdrant database using full-text matching"""
+    return _qdrant_text_search_impl(query, limit, topic, subject)
+
+@tool
+def qdrant_hybrid_search(query: str, k: int = 6, topic: Optional[str] = None, subject: Optional[str] = None) -> str:
+    """Perform intelligent hybrid search combining semantic and text-based approaches"""
+    return _qdrant_hybrid_search_impl(query, k, topic, subject)
+
+def mmr_select(query_vec: List[float], candidates_vecs: List[List[float]], k: int, lambda_mult: float) -> List[int]:
+    """
+    Select diverse results using Maximal Marginal Relevance (MMR) algorithm.
+    
+    MMR balances relevance to the query with diversity among selected results,
+    reducing redundancy and improving information coverage.
+    """
+    import numpy as np
+    
+    if not candidates_vecs or k <= 0:
+        return []
+    
+    V = np.array(candidates_vecs, dtype=float)
+    q = np.array(query_vec, dtype=float)
+
+    def cos_similarity(a, b):
+        """Calculate cosine similarity between two vectors"""
+        na = np.linalg.norm(a) + 1e-12
+        nb = np.linalg.norm(b) + 1e-12
+        return float(np.dot(a, b) / (na * nb))
+
+    # Calculate relevance scores for all candidates
+    relevance_scores = [cos_similarity(v, q) for v in V]
+    
+    selected = []
+    remaining = set(range(len(V)))
+
+    # Select first item with highest relevance
+    if remaining:
+        best_idx = max(remaining, key=lambda i: relevance_scores[i])
+        selected.append(best_idx)
+        remaining.remove(best_idx)
+
+    # Iteratively select items balancing relevance and diversity
+    while len(selected) < min(k, len(V)) and remaining:
+        best_idx = None
+        best_score = -1e9
+        
+        for i in remaining:
+            # Calculate maximum similarity to already selected items
+            max_similarity = max([cos_similarity(V[i], V[j]) for j in selected]) if selected else 0.0
+            
+            # MMR score: λ * relevance - (1-λ) * max_similarity
+            mmr_score = lambda_mult * relevance_scores[i] - (1 - lambda_mult) * max_similarity
+            
+            if mmr_score > best_score:
+                best_score = mmr_score
+                best_idx = i
+        
+        if best_idx is not None:
+            selected.append(best_idx)
+            remaining.remove(best_idx)
+    
+    return selected
+
+@tool
+def intelligent_rag_search(query: str, k: int = 6, topic: Optional[str] = None, subject: Optional[str] = None, search_strategy: Optional[str] = "auto") -> str:
+    """
+    Intelligent RAG search that automatically selects the best search strategy based on query characteristics.
+    
+    This tool analyzes the user's query to determine the optimal search approach:
+    - Hybrid search for complex conceptual queries
+    - Semantic search for conceptual/relationship queries  
+    - Text search for specific facts/keywords
+    
+    Args:
+        query: User's search query
+        k: Number of results to return (default: 6)
+        topic: Optional topic filter
+        subject: Optional subject filter
+        search_strategy: Optional manual strategy override ("auto", "hybrid", "semantic", "text")
+    
+    Returns:
+        JSON string with search results and metadata
+    """
+    
+    print(f"\n🧠 INTELLIGENT_RAG_SEARCH:")
+    
+    # Normalize inputs
+    query = normalize_input(query)
+    topic = normalize_input(topic)
+    subject = normalize_input(subject)
+    search_strategy = normalize_input(search_strategy) or "auto"
+    
+    print(f"   Query: {query}")
+    print(f"   Topic: {topic}")
+    print(f"   Subject: {subject}")
+    print(f"   K: {k}")
+    print(f"   Strategy: {search_strategy}")
+    
+    # Validate inputs
+    if not query or query.strip() == "":
+        return "ERROR: Query cannot be empty"
+    
+    # Strategy selection logic
+    if search_strategy == "auto":
+        selected_strategy = _analyze_query_for_strategy(query, topic, subject)
+        print(f"   🎯 Auto-selected strategy: {selected_strategy}")
+    else:
+        selected_strategy = search_strategy.lower()
+        print(f"   🎯 Manual strategy: {selected_strategy}")
+    
+    # Validate strategy
+    if selected_strategy not in ["hybrid", "semantic", "text"]:
+        selected_strategy = "hybrid"  # Default fallback
+        print(f"   ⚠️ Invalid strategy, using default: {selected_strategy}")
+    
+    # Execute selected strategy
+    try:
+        if selected_strategy == "hybrid":
+            result = _qdrant_hybrid_search_impl(query=query, k=k, topic=topic, subject=subject)
+        elif selected_strategy == "semantic":
+            result = _qdrant_semantic_search_impl(query=query, limit=k*2, topic=topic, subject=subject)
+        elif selected_strategy == "text":
+            result = _qdrant_text_search_impl(query=query, limit=k*2, topic=topic, subject=subject)
+        else:
+            # Fallback to hybrid
+            result = _qdrant_hybrid_search_impl(query=query, k=k, topic=topic, subject=subject)
+        
+        # Parse and enhance result with strategy info
+        try:
+            result_data = json.loads(result)
+            if isinstance(result_data, dict):
+                result_data["selected_strategy"] = selected_strategy
+                result_data["strategy_reasoning"] = _get_strategy_reasoning(selected_strategy, query)
+                
+                # Limit results to requested k for non-hybrid searches
+                if selected_strategy != "hybrid" and "documents" in result_data:
+                    result_data["documents"] = result_data["documents"][:k]
+                    result_data["total_documents"] = len(result_data["documents"])
+                
+                return json.dumps(result_data, ensure_ascii=False, indent=2)
+        except json.JSONDecodeError:
+            pass
+        
+        return result
+        
+    except Exception as e:
+        print(f"   ❌ Intelligent search error: {e}")
+        return json.dumps({
+            "status": "error",
+            "message": f"Intelligent search failed: {str(e)}",
+            "query": query,
+            "selected_strategy": selected_strategy
+        }, ensure_ascii=False, indent=2)
+
+def _analyze_query_for_strategy(query: str, topic: Optional[str] = None, subject: Optional[str] = None) -> str:
+    """
+    Analyze query characteristics to determine optimal search strategy.
+    
+    Returns:
+        str: One of "hybrid", "semantic", "text"
+    """
+    query_lower = query.lower()
+    
+    # Text search indicators (specific facts, names, exact terms)
+    text_indicators = [
+        # Question words for specific facts
+        "what is", "who is", "when did", "where is", "how much", "how many",
+        # Specific data requests
+        "definition", "define", "list", "name", "show me", "find",
+        # Exact matching needs
+        "exactly", "specifically", "precise", "exact",
+        # Technical terms that might need exact matching
+        "API", "function", "method", "class", "variable"
+    ]
+    
+    # Semantic search indicators (concepts, relationships, understanding)
+    semantic_indicators = [
+        # Conceptual understanding
+        "explain", "understand", "concept", "principle", "theory",
+        "relationship", "compare", "difference", "similarity",
+        # Abstract reasoning
+        "why", "how does", "what makes", "impact", "effect", "influence",
+        "analyze", "evaluate", "assess", "consider",
+        # Learning-oriented
+        "learn", "teach", "understand", "grasp", "comprehend"
+    ]
+    
+    # Hybrid search indicators (complex queries needing both approaches)
+    hybrid_indicators = [
+        # Complex analytical requests
+        "comprehensive", "detailed", "thorough", "complete", "overview",
+        "summary", "guide", "tutorial", "best practices",
+        # Multiple aspects
+        "aspects", "factors", "considerations", "approaches", "methods",
+        # Comparative analysis
+        "pros and cons", "advantages", "disadvantages", "trade-offs"
+    ]
+    
+    # Count indicators
+    text_score = sum(1 for indicator in text_indicators if indicator in query_lower)
+    semantic_score = sum(1 for indicator in semantic_indicators if indicator in query_lower)
+    hybrid_score = sum(1 for indicator in hybrid_indicators if indicator in query_lower)
+    
+    # Query length analysis (longer queries often benefit from hybrid)
+    word_count = len(query.split())
+    if word_count > 8:
+        hybrid_score += 1
+    elif word_count < 4:
+        text_score += 1
+    
+    # Subject/topic context analysis
+    if subject or topic:
+        # If we have specific context, hybrid often works better
+        hybrid_score += 1
+    
+    # Special case: questions with "how" often need semantic understanding
+    if query_lower.startswith("how ") and "how much" not in query_lower and "how many" not in query_lower:
+        semantic_score += 2
+    
+    # Select strategy based on highest score
+    scores = {
+        "text": text_score,
+        "semantic": semantic_score,
+        "hybrid": hybrid_score
+    }
+    
+    selected = max(scores.items(), key=lambda x: x[1])
+    
+    # If scores are tied or very low, default to hybrid
+    if selected[1] == 0 or list(scores.values()).count(selected[1]) > 1:
+        return "hybrid"
+    
+    return selected[0]
+
+def _get_strategy_reasoning(strategy: str, query: str) -> str:
+    """
+    Provide human-readable explanation for strategy selection.
+    
+    Args:
+        strategy: Selected strategy ("hybrid", "semantic", "text")
+        query: Original query
+        
+    Returns:
+        str: Explanation of why this strategy was chosen
+    """
+    if strategy == "hybrid":
+        return (
+            "Hybrid search selected for comprehensive results combining semantic understanding "
+            "with keyword matching. Best for complex queries requiring both conceptual depth "
+            "and factual precision."
+        )
+    elif strategy == "semantic":
+        return (
+            "Semantic search selected for conceptual understanding and relationship discovery. "
+            "Optimal for queries requiring interpretation of meaning and context rather than "
+            "exact keyword matching."
+        )
+    elif strategy == "text":
+        return (
+            "Text-based search selected for precise keyword and factual information retrieval. "
+            "Best for queries seeking specific terms, names, definitions, or exact data points."
+        )
+    else:
+        return "Strategy selection based on query analysis and optimization heuristics."
 
 @tool
 def format_content_as_guide(retrieved_info: Union[str, dict], query: str, topic: str, subject: Optional[str] = None) -> str:
