@@ -255,50 +255,75 @@ class WebRAGFlow(Flow[GuideCreatorState]):
     @listen('use_RAG')
     def use_RAG(self, state: GuideCreatorState) -> GuideCreatorState:
         """Use RAG crew for processing"""
-        crew = RAGCrew()
-        result = crew.kickoff(inputs={
-            "query": state.query,
-            "subject": state.subject,
-            "topic": state.topic
-        })
+        print(f"🚀 Starting RAG processing for query: {state.query}")
         
-        state.source_type = "RAG"
-        
-        # Handle the result based on its type
-        if isinstance(result, GuideOutline):
-            state.guide_outline = result
-        elif isinstance(result, dict):
-            # Parse dictionary into GuideOutline
-            state.guide_outline = GuideOutline(**result)
-        elif isinstance(result, str):
-            try:
-                # Try to parse JSON string
-                import json
-                guide_data = json.loads(result)
-                state.guide_outline = GuideOutline(**guide_data)
-            except:
-                # Create a basic outline from string result
+        try:
+            crew = RAGCrew()
+            result = crew.kickoff(inputs={
+                "query": state.query,
+                "subject": state.subject,
+                "topic": state.topic
+            })
+            
+            print(f"✅ RAG crew completed. Result type: {type(result)}")
+            state.source_type = "RAG"
+            
+            # Handle the result based on its type
+            if isinstance(result, GuideOutline):
+                print("✅ Result is already a GuideOutline")
+                state.guide_outline = result
+            elif isinstance(result, dict):
+                print("✅ Converting dict to GuideOutline")
+                # Parse dictionary into GuideOutline
+                state.guide_outline = GuideOutline(**result)
+            elif isinstance(result, str):
+                print("✅ Parsing string result")
+                try:
+                    # Try to parse JSON string
+                    import json
+                    guide_data = json.loads(result)
+                    state.guide_outline = GuideOutline(**guide_data)
+                    print("✅ Successfully parsed JSON string to GuideOutline")
+                except Exception as parse_error:
+                    print(f"⚠️ Failed to parse JSON: {parse_error}")
+                    # Create a basic outline from string result
+                    state.guide_outline = GuideOutline(
+                        title=f"{state.subject.title()} Guide: {state.topic.title()}",
+                        introduction=f"Information about {state.topic} in {state.subject}",
+                        target_audience=f"Professionals and specialists in {state.subject}",
+                        sections=[
+                            Section(title="Retrieved Information", description=str(result)[:500])
+                        ],
+                        conclusion="Information retrieved from specialized knowledge base."
+                    )
+            else:
+                print(f"⚠️ Unexpected result type: {type(result)}")
+                # Fallback for unexpected result types
                 state.guide_outline = GuideOutline(
                     title=f"{state.subject.title()} Guide: {state.topic.title()}",
                     introduction=f"Information about {state.topic} in {state.subject}",
-                    target_audience=f"Professionals and specialists in {state.subject}",
-                    sections=[
-                        Section(title="Retrieved Information", description=str(result)[:500])
-                    ],
-                    conclusion="Information retrieved from specialized knowledge base."
+                    target_audience=f"Professionals in {state.subject}",
+                    sections=self._parse_sections_from_result(result),
+                    conclusion="Information retrieved from knowledge base."
                 )
-        else:
-            # Fallback for unexpected result types
+            
+            # Add RAG-specific sources
+            state.sources = [f"RAG Database - {state.subject}/{state.topic}"]
+            print("✅ RAG processing completed successfully")
+            
+        except Exception as e:
+            print(f"❌ Error in RAG processing: {e}")
+            # Create fallback guide on error
             state.guide_outline = GuideOutline(
-                title=f"{state.subject.title()} Guide: {state.topic.title()}",
-                introduction=f"Information about {state.topic} in {state.subject}",
-                target_audience=f"Professionals in {state.subject}",
-                sections=self._parse_sections_from_result(result),
-                conclusion="Information retrieved from knowledge base."
+                title=f"Error Processing: {state.topic}",
+                introduction=f"An error occurred while processing your query about {state.topic}.",
+                target_audience="General audience",
+                sections=[
+                    Section(title="Error Information", description=f"Error: {str(e)}")
+                ],
+                conclusion="Please try again with a different query."
             )
-        
-        # Add RAG-specific sources
-        state.sources = [f"RAG Database - {state.subject}/{state.topic}"]
+            state.source_type = "RAG_ERROR"
         
         return state
 

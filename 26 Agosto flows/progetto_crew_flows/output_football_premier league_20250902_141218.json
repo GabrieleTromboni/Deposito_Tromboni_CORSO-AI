@@ -1,0 +1,41 @@
+{
+  "query": "Give me a detailed guide on Premier League and its differences with Serie A  in the football world, focusing on facilities and tips for football fans.",
+  "subject": "football",
+  "topic": "premier league",
+  "audience_level": "specialized",
+  "guide_outline": {
+    "title": "Football Guide: Premier League",
+    "introduction": "Information about premier league in football",
+    "target_audience": "Professionals in football",
+    "sections": [
+      {
+        "title": "Overview",
+        "description": "General overview of the topic"
+      },
+      {
+        "title": "Key Points",
+        "description": "Main points to understand"
+      },
+      {
+        "title": "Additional Information",
+        "description": "Further details and resources"
+      }
+    ],
+    "conclusion": "Information retrieved from knowledge base."
+  },
+  "sections_content": {},
+  "source_type": "RAG",
+  "sources": [
+    "RAG Database - football/premier league"
+  ],
+  "confidence_score": 0.95,
+  "is_valid_subject": true,
+  "is_valid_topic": true,
+  "found_subjects": [
+    "football"
+  ],
+  "found_topics": [
+    "premier league",
+    "serie a"
+  ]
+}

@@ -20,16 +20,18 @@ review_response_task:
   description: >
     Take the retrieved information from the previous task and use the format_content_as_guide tool to create a comprehensive guide.
     
-    Use the context from the previous task which contains structured document data from the RAG database.
-    The previous task output is automatically available as context.
+    The previous task has retrieved structured document data from the RAG database. This data is available as context.
     
-    Call the format_content_as_guide tool with:
-    - retrieved_info: Use the output from the previous retrieval task
+    You must call the format_content_as_guide tool with these exact parameters:
+    - retrieved_info: The complete output from the previous retrieval task (passed automatically as context)
     - query: "{query}"
     - topic: "{topic}" 
     - subject: "{subject}"
     
-    IMPORTANT: Return only the clean JSON output from the tool. Remove any markdown formatting like ```json.
+    IMPORTANT: 
+    1. Use the context from the previous task as retrieved_info parameter
+    2. Return only the clean JSON output from the tool
+    3. Remove any markdown formatting like ```json
   expected_output: >
     Clean JSON string representing a GuideOutline object without any markdown formatting or extra characters.
   agent: content_reviewer

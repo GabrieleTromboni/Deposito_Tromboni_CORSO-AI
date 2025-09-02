@@ -93,11 +93,18 @@ def create_document_filename(subject: str, topic: str, doc_type: str, doc_index:
     return f"{safe_subject}_{safe_topic}_{safe_doc_type}_{doc_index}.json"
 
 def normalize_input(value):
-    """Normalize input from CrewAI agents that might wrap strings in dict format"""
+    """Normalize input from CrewAI agents that might wrap strings in dict format or JSON"""
     if value is None:
         return None
     
     if isinstance(value, str):
+        # Try to parse as JSON if it looks like JSON
+        if value.strip().startswith('{') and value.strip().endswith('}'):
+            try:
+                parsed = json.loads(value)
+                return parsed
+            except json.JSONDecodeError:
+                return value
         return value
     
     if isinstance(value, dict):
@@ -113,6 +120,16 @@ def normalize_input(value):
         if 'value' in value and isinstance(value['value'], str):
             return value['value']
         
+        # Handle CrewAI tool metadata case like {'description': None, 'type': 'Union[str, dict]'}
+        if 'description' in value and 'type' in value:
+            if value['description'] is None:
+                # This is tool metadata, not actual content - return empty or error
+                print(f"⚠️ Received tool metadata instead of content: {value}")
+                return ""
+        
+        # If it's already a proper dict structure (like from retrieve_from_vectordb), return as-is
+        return value
+        
         # Handle other dict structures - try to extract string content
         if len(value) == 1:
             first_value = list(value.values())[0]
@@ -121,7 +138,6 @@ def normalize_input(value):
         
         # If it's a complex dict, convert to JSON string
         try:
-            import json
             return json.dumps(value, ensure_ascii=False)
         except:
             return str(value)
@@ -565,30 +581,39 @@ def retrieve_from_vectordb(query: str, topic: Optional[str] = None, subject: Opt
     if not docs:
         return f"ERROR: No relevant documents found for query: {search_query}"
 
-    # Format results as clear text for the next agent
-    result_text = f"RETRIEVED DOCUMENTS FOR QUERY: '{query}'\n"
-    result_text += f"TOPIC: {topic or 'N/A'}\n"
-    result_text += f"SUBJECT: {subject or 'N/A'}\n"
-    result_text += f"SEARCH PERFORMED: {search_query}\n\n"
+    # Format results as JSON structure for format_content_as_guide
+    documents_list = []
     
     for i, (doc, score) in enumerate(docs, 1):
-        result_text += f"--- DOCUMENT {i} (Score: {score:.3f}) ---\n"
-        result_text += f"Content: {doc.page_content}\n"
+        # JSON format document
+        doc_dict = {
+            "content": doc.page_content,
+            "score": float(score)  # Convert numpy float32 to standard float
+        }
         
         # Add metadata if available
         metadata = doc.metadata
         if metadata:
             if 'subject' in metadata:
-                result_text += f"Subject: {metadata['subject']}\n"
+                doc_dict['subject'] = metadata['subject']
             if 'topic' in metadata:
-                result_text += f"Topic: {metadata['topic']}\n"
+                doc_dict['topic'] = metadata['topic']
             if 'source' in metadata:
-                result_text += f"Source: {metadata['source']}\n"
+                doc_dict['source'] = metadata['source']
         
-        result_text += "\n"
+        documents_list.append(doc_dict)
     
-    print(f"   ✅ Returning {len(docs)} results as structured text")
-    return result_text
+    print(f"   ✅ Returning {len(docs)} results as structured data")
+    
+    # Return JSON structure that format_content_as_guide expects
+    return json.dumps({
+        "documents": documents_list,
+        "query": query,
+        "topic": topic,
+        "subject": subject,
+        "total_documents": len(docs),
+        "search_query": search_query
+    }, ensure_ascii=False, indent=2)
 
 @tool
 def format_content_as_guide(retrieved_info: Union[str, dict], query: str, topic: str, subject: Optional[str] = None) -> str:
@@ -636,54 +661,72 @@ def format_content_as_guide(retrieved_info: Union[str, dict], query: str, topic:
         )
         return error_guide.model_dump_json(indent=2)
     
-    # Parse the structured text response from retrieve_from_vectordb
-    print(f"   📄 Processing structured text input...")
+    # Parse the response from retrieve_from_vectordb
+    print(f"   📄 Processing retrieved information...")
     
-    # Extract documents from the structured text
     documents = []
-    current_doc = {}
-    content_buffer = []
     
-    lines = retrieved_info.split('\n')
-    in_document = False
+    # First, try to handle as JSON dict structure (new format)
+    if isinstance(retrieved_info, dict):
+        print(f"   📂 Processing dict input with keys: {list(retrieved_info.keys())}")
+        
+        if 'documents' in retrieved_info:
+            documents = retrieved_info['documents']
+            print(f"   📊 Found {len(documents)} documents in dict structure")
+        else:
+            # If it's a dict but not the expected structure, convert to single document
+            documents = [retrieved_info]
+            print(f"   📄 Converting single dict to document")
     
-    for line in lines:
-        if line.startswith('--- DOCUMENT '):
-            # Save previous document if exists
-            if current_doc and content_buffer:
-                current_doc['content'] = '\n'.join(content_buffer).strip()
-                documents.append(current_doc)
-            
-            # Start new document
-            current_doc = {}
-            content_buffer = []
-            in_document = True
-            
-            # Extract score if available
-            if 'Score:' in line:
-                try:
-                    score_str = line.split('Score: ')[1].split(')')[0]
-                    current_doc['score'] = float(score_str)
-                except:
-                    current_doc['score'] = 0.0
-            
-        elif line.startswith('Content: '):
-            content_buffer.append(line[9:])  # Remove 'Content: ' prefix
-        elif line.startswith('Subject: '):
-            current_doc['subject'] = line[9:]
-        elif line.startswith('Topic: '):
-            current_doc['topic'] = line[7:]
-        elif line.startswith('Source: '):
-            current_doc['source'] = line[8:]
-        elif in_document and line.strip() and not line.startswith('---'):
-            content_buffer.append(line)
+    # If no documents found yet, try parsing as structured text (legacy format)
+    elif isinstance(retrieved_info, str):
+        print(f"   📄 Processing structured text input...")
+        
+        current_doc = {}
+        content_buffer = []
+        
+        lines = retrieved_info.split('\n')
+        in_document = False
+        
+        for line in lines:
+            if line.startswith('--- DOCUMENT '):
+                # Save previous document if exists
+                if current_doc and content_buffer:
+                    current_doc['content'] = '\n'.join(content_buffer).strip()
+                    documents.append(current_doc)
+                
+                # Start new document
+                current_doc = {}
+                content_buffer = []
+                in_document = True
+                
+                # Extract score if available
+                if 'Score:' in line:
+                    try:
+                        score_str = line.split('Score: ')[1].split(')')[0]
+                        current_doc['score'] = float(score_str)
+                    except:
+                        current_doc['score'] = 0.0
+                
+            elif line.startswith('Content: '):
+                content_buffer.append(line[9:])  # Remove 'Content: ' prefix
+            elif line.startswith('Subject: '):
+                current_doc['subject'] = line[9:]
+            elif line.startswith('Topic: '):
+                current_doc['topic'] = line[7:]
+            elif line.startswith('Source: '):
+                current_doc['source'] = line[8:]
+            elif in_document and line.strip() and not line.startswith('---'):
+                content_buffer.append(line)
+        
+        # Save last document
+        if current_doc and content_buffer:
+            current_doc['content'] = '\n'.join(content_buffer).strip()
+            documents.append(current_doc)
+        
+        print(f"   📊 Extracted {len(documents)} documents from structured text")
     
-    # Save last document
-    if current_doc and content_buffer:
-        current_doc['content'] = '\n'.join(content_buffer).strip()
-        documents.append(current_doc)
-    
-    print(f"   📊 Extracted {len(documents)} documents from structured text")
+    print(f"   📊 Final document count: {len(documents)}")
     
     # Combine all content
     combined_content = ""
