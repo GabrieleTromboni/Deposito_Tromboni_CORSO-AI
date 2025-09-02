@@ -34,15 +34,36 @@ def main():
     database_path = "RAG_database"
     database_exists = os.path.exists(database_path) and os.path.exists(os.path.join(database_path, "index.faiss"))
     
-    if database_exists:
-        print("✅ RAG database already exists and is ready to use!")
+    # Ask user for vector database preference
+    print("\n🔧 Vector Database Selection:")
+    print("Choose your preferred vector database:")
+    print("1. FAISS (Local file-based storage)")
+    print("2. Qdrant (Vector database server)")
+    
+    while True:
+        choice = input("\nEnter your choice (1 for FAISS, 2 for Qdrant): ").strip()
+        if choice == "1":
+            use_qdrant = False
+            db_type = "FAISS"
+            break
+        elif choice == "2":
+            use_qdrant = True
+            db_type = "Qdrant"
+            break
+        else:
+            print("Invalid choice. Please enter 1 or 2.")
+    
+    print(f"✅ Selected: {db_type} vector database")
+    
+    if database_exists and not use_qdrant:
+        print("✅ FAISS RAG database already exists and is ready to use!")
         print("   Skipping database initialization...")
     else:
-        print("\n🔄 RAG database not found. Initializing...")
+        print(f"\n🔄 {db_type} database not found or different type selected. Initializing...")
         # Initialize DatabaseCrew to create database with all subjects
-        database_crew = DatabaseCrew()
+        database_crew = DatabaseCrew(use_qdrant=use_qdrant)
 
-        print("Using optimized document generation with rate limiting for efficiency...")
+        print(f"Using optimized document generation with {db_type} and rate limiting for efficiency...")
         initialization_result = database_crew.kickoff(
             WebRAGFlow.SUBJECTS, 
             docs_per_topic=1,          # Generate 1 document per topic

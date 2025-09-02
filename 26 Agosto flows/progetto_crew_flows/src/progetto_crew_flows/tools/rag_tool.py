@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from progetto_crew_flows.models import GuideOutline, Section
 import uuid
 from datetime import datetime
+
 # Qdrant vector database client and models
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -59,7 +60,7 @@ class Settings:
 # Class di setting degli iperparametri per utilizzo di Qdrant
 class QdrantSetting:
     qdrant_url: str = os.getenv("QDRANT_URL")
-    collection: str = os.getenv("QDRANT_COLLECTION")
+    persist_dir: str = os.getenv("QDRANT_COLLECTION")
     chunk_size: int = 800
     chunk_overlap: int = 100
     top_n_semantic: int = 30
@@ -175,7 +176,10 @@ def normalize_input(value):
             return str(value)
     
     return str(value)
-    
+
+def get_qdrant_client(settings: QdrantSetting) -> QdrantClient:
+    return QdrantClient(url=settings.qdrant_url)
+
 @tool
 def generate_documents_as_files(topics: List[str], docs_per_topic: int = 3, max_tokens_per_doc: int = 800, batch_size: int = 2, delay_between_batches: float = 2.0) -> str:
     """Generate documents for specified topics and save each as individual JSON files"""
@@ -364,102 +368,316 @@ Focus on depth and specificity for {topic}.""",
         "topics_processed": len(topics),
         "docs_per_topic": docs_per_topic
     }, ensure_ascii=False, indent=2)
-
-
-def get_qdrant_client(settings: Settings) -> QdrantClient:
-    return QdrantClient(url=settings.qdrant_url)
  
-def recreate_collection_for_rag(client: QdrantClient, settings: Settings, vector_size: int):
+@tool
+def recreate_collection_for_rag(vector_size: int, qdrant_url: Optional[str] = None, collection_name: Optional[str] = None) -> str:
     """
     Create or recreate a Qdrant collection optimized for RAG (Retrieval-Augmented Generation).
-   
-    This function sets up a vector database collection with optimal configuration for
-    semantic search, including HNSW indexing, payload indexing, and quantization.
-   
-    Args:
-        client: Qdrant client instance for database operations
-        settings: Configuration object containing collection parameters
-        vector_size: Dimension of the embedding vectors (e.g., 384 for MiniLM-L6)
-       
-    Collection Architecture:
-    - Vector storage: Dense vectors for semantic similarity search
-    - Payload storage: Metadata and text content for retrieval
-    - Indexing: HNSW for approximate nearest neighbor search
-    - Quantization: Scalar quantization for memory optimization
-       
-    Distance Metric Selection:
-    - Cosine distance: Normalized similarity, good for semantic embeddings
-    - Alternatives: Euclidean (L2), Manhattan (L1), Dot product
-    - Cosine preferred for normalized embeddings (sentence-transformers)
-       
-    HNSW Index Configuration:
-    - m=32: Average connections per node (higher = better quality, more memory)
-    - ef_construct=256: Search depth during construction (higher = better quality, slower build)
-    - Trade-offs: Higher values improve recall but increase memory and build time
-       
-    Optimizer Configuration:
-    - default_segment_number=2: Parallel processing segments
-    - Benefits: Faster indexing, better resource utilization
-    - Considerations: More segments = more memory overhead
-       
-    Quantization Strategy:
-    - Scalar quantization: Reduces vector precision from float32 to int8
-    - Memory savings: ~4x reduction in vector storage
-    - Quality impact: Minimal impact on search accuracy
-    - always_ram=False: Vectors stored on disk, loaded to RAM as needed
-       
-    Payload Indexing Strategy:
-    - Text index: Full-text search capabilities (BM25 scoring)
-    - Keyword indices: Fast exact matching and filtering
-    - Performance: Significantly faster than unindexed field searches
-       
-    Collection Lifecycle:
-    - recreate_collection: Drops existing collection and creates new one
-    - Use case: Development/testing, major schema changes
-    - Production: Consider using create_collection + update_collection_info
-       
-    Performance Considerations:
-    - Build time: HNSW construction scales with collection size
-    - Memory usage: Vectors loaded to RAM during search
-    - Storage: Quantized vectors + payload data
-    - Query latency: HNSW provides sub-millisecond search times
-       
-    Scaling Guidelines:
-    - Small collections (<100K vectors): Current settings optimal
-    - Medium collections (100K-1M vectors): Increase m to 48-64
-    - Large collections (1M+ vectors): Consider multiple collections or sharding
+    Works in sync with generate_documents_as_files output format.
+    
+    Returns:
+        JSON string with collection creation status and details
     """
-    client.recreate_collection(
-        collection_name=settings.collection,
-        vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
-        hnsw_config=HnswConfigDiff(
-            m=32,             # grado medio del grafo HNSW (maggiore = più memoria/qualità)
-            ef_construct=256  # ampiezza lista candidati in fase costruzione (qualità/tempo build)
-        ),
-        optimizers_config=OptimizersConfigDiff(
-            default_segment_number=2  # parallelismo/segmentazione iniziale
-        ),
-        quantization_config=ScalarQuantization(
-            scalar=ScalarQuantizationConfig(type="int8", always_ram=False)  # on-disk quantization dei vettori
-        ),
-    )
- 
-    # Indice full-text sul campo 'text' per filtri MatchText
-    client.create_payload_index(
-        collection_name=settings.collection,
-        field_name="text",
-        field_schema=PayloadSchemaType.TEXT
-    )
- 
-    # Indici keyword per filtri esatti / velocità nei filtri
-    for key in ["doc_id", "source", "title", "lang"]:
-        client.create_payload_index(
-            collection_name=settings.collection,
-            field_name=key,
-            field_schema=PayloadSchemaType.KEYWORD
+    print(f"\n🔧 RECREATE_COLLECTION_FOR_RAG:")
+    
+    # Use settings or provided parameters
+    settings = SETTINGS
+    if qdrant_url:
+        settings.qdrant_url = qdrant_url
+    if collection_name:
+        settings.collection = collection_name
+        
+    print(f"   Qdrant URL: {settings.qdrant_url}")
+    print(f"   Collection: {settings.persist_dir}")
+    
+    # Validate Qdrant connection parameters
+    if not settings.qdrant_url:
+        return json.dumps({
+            "status": "error",
+            "message": "Qdrant URL not configured. Set QDRANT_URL environment variable."
+        }, ensure_ascii=False, indent=2)
+    
+    if not settings.persist_dir:
+        return json.dumps({
+            "status": "error", 
+            "message": "Collection name not configured. Set QDRANT_COLLECTION environment variable."
+        }, ensure_ascii=False, indent=2)
+    
+    try:
+        # Initialize Qdrant client
+        client = get_qdrant_client(settings)
+        print(f"   📡 Connected to Qdrant at {settings.qdrant_url}")
+        
+        # Get embedding dimensions from Azure OpenAI
+        if not safe_embeddings_check():
+            return json.dumps({
+                "status": "error",
+                "message": "Azure OpenAI embeddings not available"
+            }, ensure_ascii=False, indent=2)
+        
+        # Test embedding to get actual vector size (override provided parameter)
+        test_embedding = EMBEDDINGS.embed_query("test")
+        actual_vector_size = len(test_embedding)
+        print(f"   📏 Detected vector dimensions: {actual_vector_size} (provided: {vector_size})")
+        
+        # Use actual dimensions instead of provided parameter
+        vector_size = actual_vector_size
+        client.recreate_collection(
+            collection_name=settings.persist_dir,
+            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+            hnsw_config=HnswConfigDiff(
+                m=32,             # grado medio del grafo HNSW (maggiore = più memoria/qualità)
+                ef_construct=256  # ampiezza lista candidati in fase costruzione (qualità/tempo build)
+            ),
+            optimizers_config=OptimizersConfigDiff(
+                default_segment_number=2  # parallelismo/segmentazione iniziale
+            ),
+            quantization_config=ScalarQuantization(
+                scalar=ScalarQuantizationConfig(type="int8", always_ram=False)  # on-disk quantization dei vettori
+            ),
         )
+        print(f"   ✅ Collection '{settings.persist_dir}' recreated successfully")
+
+        # Create payload indices for optimized filtering and search
+        # Text index for full-text search (BM25)
+        client.create_payload_index(
+            collection_name=settings.persist_dir,
+            field_name="content",  # Match document content field
+            field_schema=PayloadSchemaType.TEXT
+        )
+        
+        # Keyword indices for exact matching and fast filtering
+        keyword_fields = ["subject", "topic", "doc_type", "source", "doc_id"]
+        for field in keyword_fields:
+            try:
+                client.create_payload_index(
+                    collection_name=settings.persist_dir,
+                    field_name=field,
+                    field_schema=PayloadSchemaType.KEYWORD
+                )
+            except Exception as e:
+                print(f"   ⚠️ Warning: Could not create index for field '{field}': {e}")
+        
+        print(f"   📊 Created {len(keyword_fields) + 1} payload indices")
+        
+        # Return success status
+        return json.dumps({
+            "status": "success",
+            "collection_name": settings.persist_dir,
+            "vector_size": vector_size,
+            "qdrant_url": settings.qdrant_url,
+            "indices_created": len(keyword_fields) + 1,
+            "message": f"Qdrant collection '{settings.persist_dir}' ready for RAG operations"
+        }, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        print(f"   ❌ Error creating Qdrant collection: {e}")
+        return json.dumps({
+            "status": "error",
+            "message": f"Failed to create Qdrant collection: {str(e)}",
+            "collection_name": settings.persist_dir if settings.persist_dir else "unknown"
+        }, ensure_ascii=False, indent=2)
+
 @tool
-def create_qdrant_collection
+def store_documents_in_qdrant() -> str:
+    """Load individual JSON document files and store them in the Qdrant vector database"""
+    
+    print(f"\n🔧 STORE_DOCUMENTS_IN_QDRANT:")
+    
+    # Validate Qdrant configuration
+    settings = SETTINGS
+    if not settings.qdrant_url or not settings.persist_dir:
+        return json.dumps({
+            "status": "error",
+            "message": "Qdrant URL or collection name not configured. Check QDRANT_URL and QDRANT_COLLECTION environment variables."
+        }, ensure_ascii=False, indent=2)
+    
+    # Check embeddings availability
+    if not safe_embeddings_check():
+        return json.dumps({
+            "status": "error", 
+            "message": "Azure OpenAI embeddings not available"
+        }, ensure_ascii=False, indent=2)
+    
+    docs_dir = Path(SETTINGS.persist_dir) / "documents"
+    
+    if not docs_dir.exists():
+        return json.dumps({
+            "status": "error",
+            "message": "Documents directory not found. Run generate_documents_as_files first.",
+            "path": str(docs_dir)
+        }, ensure_ascii=False, indent=2)
+    
+    # Find all JSON document files
+    json_files = list(docs_dir.rglob("*.json"))
+    print(f"   📄 Found {len(json_files)} document files")
+    
+    if not json_files:
+        return json.dumps({
+            "status": "error",
+            "message": "No document files found",
+            "path": str(docs_dir)
+        }, ensure_ascii=False, indent=2)
+    
+    try:
+        # Connect to Qdrant
+        client = get_qdrant_client(settings)
+        print(f"   📡 Connected to Qdrant collection: {settings.persist_dir}")
+
+        # Load all documents
+        documents = []
+        file_stats = {}
+        
+        for json_file in json_files:
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    doc_data = json.load(f)
+                
+                # Create document with metadata matching generate_documents_as_files format
+                doc = Document(
+                    page_content=doc_data['content'],
+                    metadata={
+                        "doc_id": doc_data.get('id', str(uuid.uuid4())),
+                        "subject": doc_data.get('subject', 'unknown'),
+                        "topic": doc_data.get('topic', 'unknown'),
+                        "doc_type": doc_data.get('doc_type', 'unknown'),
+                        "source": doc_data.get('metadata', {}).get('source', 'ai_generated'),
+                        "generated_at": doc_data.get('generated_at'),
+                        "strategy": doc_data.get('strategy', 'unknown'),
+                        "file_path": str(json_file)
+                    }
+                )
+                documents.append(doc)
+                
+                # Track file statistics
+                key = f"{doc_data.get('subject', 'unknown')}_{doc_data.get('topic', 'unknown')}"
+                if key not in file_stats:
+                    file_stats[key] = 0
+                file_stats[key] += 1
+                
+                print(f"   ✅ Loaded: {json_file.stem} ({len(doc_data['content'])} chars)")
+                
+            except Exception as e:
+                print(f"   ❌ Error loading {json_file}: {e}")
+                continue
+        
+        if not documents:
+            return json.dumps({
+                "status": "error",
+                "message": "No valid documents could be loaded",
+                "files_found": len(json_files)
+            }, ensure_ascii=False, indent=2)
+        
+        print(f"\n   📊 Document distribution:")
+        for key, count in file_stats.items():
+            print(f"      {key}: {count} documents")
+        
+        # Split documents into chunks
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+            separators=["\n\n", "\n", ". ", " ", ""]
+        )
+        chunks = splitter.split_documents(documents)
+        print(f"   🔪 Split into {len(chunks)} chunks (chunk_size={settings.chunk_size}, overlap={settings.chunk_overlap})")
+        
+        # Generate embeddings and create points for Qdrant
+        points = []
+        batch_size = 10  # Process in batches to avoid memory issues
+        
+        print(f"   🧮 Generating embeddings and creating Qdrant points...")
+        
+        for i in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[i:i + batch_size]
+            
+            # Generate embeddings for batch
+            texts = [chunk.page_content for chunk in batch_chunks]
+            embeddings = EMBEDDINGS.embed_documents(texts)
+            
+            # Create Qdrant points
+            for j, (chunk, embedding) in enumerate(zip(batch_chunks, embeddings)):
+                point_id = i + j
+                
+                # Convert numpy float32 to regular float for JSON serialization
+                if hasattr(embedding, 'tolist'):
+                    embedding = embedding.tolist()
+                elif isinstance(embedding, list):
+                    embedding = [float(x) for x in embedding]
+                
+                point = PointStruct(
+                    id=point_id,
+                    vector=embedding,
+                    payload={
+                        "content": chunk.page_content,
+                        "subject": chunk.metadata.get("subject", "unknown"),
+                        "topic": chunk.metadata.get("topic", "unknown"), 
+                        "doc_type": chunk.metadata.get("doc_type", "unknown"),
+                        "doc_id": chunk.metadata.get("doc_id", "unknown"),
+                        "source": chunk.metadata.get("source", "ai_generated"),
+                        "generated_at": chunk.metadata.get("generated_at"),
+                        "strategy": chunk.metadata.get("strategy", "unknown"),
+                        "chunk_index": point_id,
+                        "content_length": len(chunk.page_content)
+                    }
+                )
+                points.append(point)
+            
+            print(f"      Processed batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}")
+        
+        # Upload points to Qdrant in batches
+        upload_batch_size = 50
+        total_uploaded = 0
+        
+        print(f"   ⬆️ Uploading {len(points)} points to Qdrant in batches of {upload_batch_size}...")
+        
+        for i in range(0, len(points), upload_batch_size):
+            batch_points = points[i:i + upload_batch_size]
+            
+            try:
+                client.upsert(
+                    collection_name=settings.persist_dir,
+                    points=batch_points
+                )
+                total_uploaded += len(batch_points)
+                print(f"      Uploaded batch {i//upload_batch_size + 1}/{(len(points) + upload_batch_size - 1)//upload_batch_size} ({total_uploaded}/{len(points)} points)")
+                
+            except Exception as e:
+                print(f"      ❌ Error uploading batch {i//upload_batch_size + 1}: {e}")
+                continue
+        
+        # Create detailed summary
+        chunk_stats = {}
+        for chunk in chunks:
+            key = f"{chunk.metadata.get('subject', 'unknown')}_{chunk.metadata.get('topic', 'unknown')}"
+            if key not in chunk_stats:
+                chunk_stats[key] = 0
+            chunk_stats[key] += 1
+        
+        print(f"\n   📈 Chunk distribution:")
+        for key, count in chunk_stats.items():
+            print(f"      {key}: {count} chunks")
+        
+        print(f"\n   ✅ Successfully stored {total_uploaded} chunks in Qdrant collection '{settings.persist_dir}'")
+        
+        return json.dumps({
+            "status": "success",
+            "documents_loaded": len(documents),
+            "chunks_created": len(chunks),
+            "points_uploaded": total_uploaded,
+            "files_processed": len(json_files),
+            "chunk_distribution": chunk_stats,
+            "document_distribution": file_stats,
+            "collection_name": settings.collection,
+            "qdrant_url": settings.qdrant_url
+        }, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        print(f"   ❌ Error storing documents in Qdrant: {e}")
+        return json.dumps({
+            "status": "error",
+            "message": f"Failed to store documents in Qdrant: {str(e)}",
+            "collection_name": settings.collection if settings.collection else "unknown"
+        }, ensure_ascii=False, indent=2)
 
 @tool
 def create_vectordb() -> str:
