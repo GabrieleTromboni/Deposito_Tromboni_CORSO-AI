@@ -18,23 +18,17 @@ Instructions for use:
     First and second steps must be done with an LLM (Large Language Model) with care and precision.
     '''
 
-from progetto_crew_flows.crews.database_crew.data_crew import DatabaseCrew
+from progetto_crew_flows.crews.database_crew.database_crew import DatabaseCrew, create_database_crew
 from progetto_crew_flows.WebRAG_flow import WebRAGFlow 
 
 def main():
     """Main execution function"""
     
-    # Optional: Check/Initialize RAG database
+    # Vector Database Selection
     print("\n" + "="*60)
-    print("CHECKING RAG DATABASE STATUS")
+    print("VECTOR DATABASE SETUP")
     print("="*60)
 
-    # Check if database exists first
-    import os
-    database_path = "RAG_database"
-    database_exists = os.path.exists(database_path) and os.path.exists(os.path.join(database_path, "index.faiss"))
-    
-    # Ask user for vector database preference
     print("\n🔧 Vector Database Selection:")
     print("Choose your preferred vector database:")
     print("1. FAISS (Local file-based storage)")
@@ -43,135 +37,161 @@ def main():
     while True:
         choice = input("\nEnter your choice (1 for FAISS, 2 for Qdrant): ").strip()
         if choice == "1":
-            use_qdrant = False
-            db_type = "FAISS"
+            database_type = "faiss"
+            db_name = "FAISS"
             break
         elif choice == "2":
-            use_qdrant = True
-            db_type = "Qdrant"
+            database_type = "qdrant"
+            db_name = "Qdrant"
             break
         else:
             print("Invalid choice. Please enter 1 or 2.")
     
-    print(f"✅ Selected: {db_type} vector database")
+    print(f"✅ Selected: {db_name} vector database")
     
-    if database_exists and not use_qdrant:
-        print("✅ FAISS RAG database already exists and is ready to use!")
-        print("   Skipping database initialization...")
-    else:
-        print(f"\n🔄 {db_type} database not found or different type selected. Initializing...")
-        # Initialize DatabaseCrew to create database with all subjects
-        database_crew = DatabaseCrew(use_qdrant=use_qdrant)
-
-        print(f"Using optimized document generation with {db_type} and rate limiting for efficiency...")
-        initialization_result = database_crew.kickoff(
-            WebRAGFlow.SUBJECTS, 
-            docs_per_topic=1,          # Generate 1 document per topic
-            max_tokens_per_doc=600,    # Reduced token limit for efficiency
-            batch_size=3               # Process 3 topics per batch to avoid rate limits
-        )
-        
-        # Check if database initialization was successful
-        if isinstance(initialization_result, dict):
-            if initialization_result.get("status") == "error":
-                print(f"❌ Error initializing database: {initialization_result.get('message')}")
-                print("Continuing with limited functionality (web search only)...")
-            else:
-                print("✅ RAG database initialization completed!")
-        else:
-            print(f"✅ Database initialization result: {initialization_result}")
-    
-    print("\n" + "="*60)
-    print("STARTING INFORMATION QUERY SYSTEM")
-    print("="*60)
-    
-    # Initialize the flow
-    flow = WebRAGFlow()
-    
-    print("\nAvailable subjects and topics:")
-    for subject, topics in WebRAGFlow.SUBJECTS.items():
-        print(f"\n{subject.upper()}:")
-        for topic in topics:
-            print(f"  - {topic}")
-    
-    print("\n" + "-"*60)
-    print("You can ask questions about any of the above subjects and topics.")
-    print("If your question matches our knowledge base, RAG will be used.")
-    print("Otherwise, web search will be performed.")
-    print("Type 'exit' to quit\n")
+    # Database Operation Selection
+    print("\n🔧 Operation Selection:")
+    print("Choose what you want to do:")
+    print("1. Create/Initialize Database")
+    print("2. Query Existing Database (RAG)")
+    print("3. Both (Create if needed, then query)")
     
     while True:
-        # Get user input
-        query = input("\nEnter your query (or 'exit' to quit): ")
-
-        # Ensure we have a valid string query
-        query_str = str(query).strip()
-        if not query_str:
-            raise ValueError("Empty query provided to the flow")
-        
-        if query_str.lower() == 'exit':
-            print("\nGoodbye!")
+        op_choice = input("\nEnter your choice (1, 2, or 3): ").strip()
+        if op_choice in ["1", "2", "3"]:
             break
+        else:
+            print("Invalid choice. Please enter 1, 2, or 3.")
+    
+    # Initialize DatabaseCrew
+    database_crew = create_database_crew()
+    
+    # Handle database creation if requested
+    if op_choice in ["1", "3"]:
+        print(f"\n🔄 Creating {db_name} database...")
         
-        if not query_str:
-            print("Please enter a valid query.")
-            continue
+        # For demo, create databases for all subjects
+        subjects_topics = {
+            "medicine": ["cardiology", "neurology", "oncology"],
+            "football": ["premier league", "serie a", "champions league"], 
+            "technology": ["artificial intelligence", "machine learning", "blockchain"]
+        }
         
-        try:
-            # Process the query
-            print(f"\nProcessing query: '{query_str}'")
-            print("-" * 40)
+        for subject, topics in subjects_topics.items():
+            for topic in topics:
+                print(f"   Creating database for {subject} - {topic}...")
+                try:
+                    result = database_crew.create_database(
+                        subject=subject,
+                        topic=topic,
+                        database_type=database_type
+                    )
+                    if result.get('status') == 'success':
+                        print(f"   ✅ Created {subject}/{topic}")
+                    else:
+                        print(f"   ⚠️ Issue with {subject}/{topic}: {result}")
+                except Exception as e:
+                    print(f"   ❌ Error creating {subject}/{topic}: {e}")
+        
+        print(f"✅ {db_name} database creation completed!")
+    
+    # Handle querying if requested  
+    if op_choice in ["2", "3"]:
+        print(f"\n🔍 Starting RAG Query System with {db_name}...")
+        
+        # Available databases for the flow
+        available_databases = [database_type]
+        
+        print("\nAvailable subjects and topics:")
+        subjects_topics = {
+            "medicine": ["cardiology", "neurology", "oncology"],
+            "football": ["premier league", "serie a", "champions league"],
+            "technology": ["artificial intelligence", "machine learning", "blockchain"]
+        }
+        
+        for subject, topics in subjects_topics.items():
+            print(f"\n{subject.upper()}:")
+            for topic in topics:
+                print(f"  - {topic}")
+        
+        print("\n" + "-"*60)
+        print("You can ask questions about any of the above subjects and topics.")
+        print(f"RAG will use {db_name} database for retrieval.")
+        print("Type 'exit' to quit\n")
+        
+        while True:
+            # Get user input
+            query = input("\nEnter your query (or 'exit' to quit): ")
+            query_str = str(query).strip()
             
-            result = flow.kickoff(inputs={"query": query_str})
+            if query_str.lower() == 'exit':
+                print("\nGoodbye!")
+                break
             
-            # Display processing details
-            print(f"\nExtracted Subject: {result.subject}")
-            print(f"Extracted Topic: {result.topic}")
-            print(f"Validation: Subject={'✓' if result.is_valid_subject else '✗'}, Topic={'✓' if result.is_valid_topic else '✗'}")
-            print(f"Source Type: {result.source_type}")
-            print(f"Confidence Score: {result.confidence_score:.2f}")
+            if not query_str:
+                print("Please enter a valid query.")
+                continue
             
-            # Display the result
-            if result.guide_outline:
-                print("\n" + "="*60)
-                print("GENERATED GUIDE")
-                print("="*60)
-                print(f"\nTitle: {result.guide_outline.title}")
-                print(f"Target Audience: {result.guide_outline.target_audience}")
-                print(f"\nIntroduction:\n{result.guide_outline.introduction}")
-                print(f"\nSections:")
-                for i, section in enumerate(result.guide_outline.sections, 1):
-                    print(f"\n  {i}. {section.title}:")
-                    # Truncate long descriptions for display
-                    desc = section.description
-                    if len(desc) > 200:
-                        desc = desc[:200] + "..."
-                    print(f"     {desc}")
-                print(f"\nConclusion:\n{result.guide_outline.conclusion}")
+            # For demo, let user specify subject and topic
+            print("\nFor better results, specify the subject and topic:")
+            subject = input("Subject (medicine/football/technology): ").strip().lower()
+            topic = input("Topic (e.g., cardiology, premier league): ").strip().lower()
+            
+            if not subject or not topic:
+                print("Using auto-detection for subject and topic...")
+                subject = "general"
+                topic = "general"
+            
+            try:
+                print(f"\nProcessing query: '{query_str}'")
+                print(f"Subject: {subject}, Topic: {topic}")
+                print("-" * 40)
                 
-                if result.sources:
-                    print(f"\nSources:")
-                    for source in result.sources:
-                        print(f"  - {source}")
-            else:
-                print("\nNo guide could be generated. Please try a different query.")
-        
-        except Exception as e:
-            print(f"\nError processing query: {e}")
-            import traceback
-            traceback.print_exc()
-            print("Please try again with a different query.")
+                # Execute RAG using DatabaseCrew
+                result = database_crew.execute_rag(
+                    query=query_str,
+                    subject=subject,
+                    topic=topic,
+                    database_type=database_type,
+                    available_databases=available_databases
+                )
+                
+                # Display the result
+                if result.get('status') == 'success':
+                    guide = result.get('result', {})
+                    if isinstance(guide, dict) and 'title' in guide:
+                        print("\n" + "="*60)
+                        print("GENERATED GUIDE")
+                        print("="*60)
+                        print(f"\nTitle: {guide.get('title', 'No title')}")
+                        print(f"Target Audience: {guide.get('target_audience', 'General')}")
+                        print(f"\nIntroduction:\n{guide.get('introduction', 'No introduction')}")
+                        
+                        sections = guide.get('sections', [])
+                        if sections:
+                            print(f"\nSections:")
+                            for i, section in enumerate(sections, 1):
+                                print(f"\n  {i}. {section.get('title', 'No title')}:")
+                                desc = section.get('description', 'No description')
+                                if len(desc) > 200:
+                                    desc = desc[:200] + "..."
+                                print(f"     {desc}")
+                        
+                        print(f"\nConclusion:\n{guide.get('conclusion', 'No conclusion')}")
+                    else:
+                        print(f"\nResult: {result}")
+                else:
+                    print(f"\nError: {result.get('message', 'Unknown error')}")
+                
+            except Exception as e:
+                print(f"\nError processing query: {e}")
+                import traceback
+                traceback.print_exc()
+                print("Please try again with a different query.")
 
 def kickoff():
     """Entry point for crewai run command"""
-    # Plot the flow diagram
-    print("\nGenerating flow diagram...")
-    flow = WebRAGFlow()
-    try:
-        flow.plot("WebRAG_flow_diagram")
-        print("Flow diagram saved as 'WebRAG_flow_diagram.png'")
-    except Exception as e:
-        print(f"Could not generate flow diagram: {e}")
+    print("\nStarting DatabaseCrew-based RAG system...")
     main()
 
 if __name__ == "__main__":

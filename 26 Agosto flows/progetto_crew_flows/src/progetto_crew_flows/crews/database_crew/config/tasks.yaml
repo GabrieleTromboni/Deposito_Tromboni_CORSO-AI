@@ -1,41 +1,106 @@
-generation_documents_task:
+create_qdrant_database_task:
   description: >
-    Generate exactly {docs_per_topic} documents ONCE for each topic in the knowledge base: {topic}.
-    Use the generate_documents_as_files tool with topics={topics}, docs_per_topic={docs_per_topic}, max_tokens_per_doc={max_tokens_per_doc}, batch_size={batch_size}.
-    DO NOT repeat document generation for the same topics.
-    Each document will be saved as an individual JSON file in a structured directory format.
-    This approach ensures clean separation between documents and eliminates JSON parsing issues.
+    Create and populate a Qdrant vector database with documents for the specified domain.
+    
+    Database Configuration:
+    - Subject: "{subject}"
+    - Topic: "{topic}" 
+    - Database type: "{database_type}"
+    - Collection name: "{collection_name}"
+    
+    Process:
+    1. Use recreate_collection_for_rag to establish the database collection (vector_size=1536)
+    2. Use store_documents_in_qdrant to populate with relevant documents
+    3. Verify database creation and document storage
+    4. Report database statistics and configuration
+    
+    Parameters to use for recreate_collection_for_rag:
+    - vector_size: 1536 (Azure OpenAI embedding dimension)
+    - collection_name: "{collection_name}" (optional)
+    
+    Then call store_documents_in_qdrant() to populate the collection.
+    
+    Ensure the database is properly configured for both semantic search and text-based retrieval.
   expected_output: >
-    JSON response from generate_documents_as_files tool confirming that exactly {docs_per_topic} individual JSON files per topic have been created for all {topics} topics.
-    Return the complete response including file paths and generation statistics.
-  agent: document_generator
+    JSON response containing database creation status, document count, collection configuration,
+    and any relevant metadata about the created Qdrant database.
+  agent: qdrant_specialist
 
-create_database_task:
+create_faiss_database_task:
   description: >
-    Create the RAG database ONCE for storing generated documents using the create_vectordb tool.
-    DO NOT repeat database creation if it already exists.
+    Create and populate a FAISS vector database with documents for the specified domain.
+    
+    Database Configuration:
+    - Subject: "{subject}"
+    - Topic: "{topic}"
+    - Database type: "{database_type}"
+    
+    Process:
+    1. Use create_vectordb to create the FAISS database structure
+    2. Use store_individual_documents to populate with relevant documents
+    3. Verify database creation and document storage
+    4. Report database statistics and configuration
+    
+    Call create_vectordb() first, then store_individual_documents().
+    
+    Ensure the database is properly configured for semantic similarity search.
   expected_output: >
-    Confirmation message from create_vectordb tool that the database has been successfully created.
-  agent: database_engineer
+    JSON response containing database creation status, document count, chunks created,
+    and database file location for the created FAISS database.
+  agent: database_manager
 
-store_documents_task:
+execute_rag_retrieval_task:
   description: >
-    Load and store ALL individual document JSON files created by the generation_documents_task.
+    Execute intelligent RAG retrieval using the most appropriate search strategy and database.
     
-    Use the store_individual_documents tool which will:
-    1. Find all JSON document files in the documents directory
-    2. Load each file individually (no JSON parsing issues)
-    3. Create chunks from each document separately
-    4. Store all chunks in the vector database with proper metadata
+    Query Information:
+    - Query: "{query}"
+    - Subject: "{subject}"
+    - Topic: "{topic}"
+    - Database type: "{database_type}"
+    - Available databases: {available_databases}
     
-    Call: store_individual_documents()
+    Strategy Selection:
+    1. If Qdrant is available and requested, use intelligent_rag_search (auto-strategy selection)
+    2. For FAISS databases, use retrieve_from_vectordb
+    3. For manual Qdrant control: qdrant_hybrid_search, qdrant_semantic_search, qdrant_text_search
     
-    This approach processes each document file individually, ensuring proper topic/subject separation
-    and eliminating the JSON parsing issues from the previous approach.
+    Call your chosen tool with these parameters:
+    - query: "{query}"
+    - topic: "{topic}"
+    - subject: "{subject}"
+    - k: 6 (for Qdrant tools)
+    - limit: 12 (for FAISS tools)
+    
+    Return the complete tool output without modification.
   expected_output: >
-    Detailed JSON response from store_individual_documents tool showing:
-    - Number of document files processed
-    - Number of chunks created and stored
-    - Distribution of chunks by subject/topic
-    - Complete success confirmation for all medicine, football, and technology documents
-  agent: database_engineer
+    Complete search results from the selected tool, either as JSON response (Qdrant) 
+    or structured text (FAISS) with documents and metadata.
+  agent: rag_retrieval_specialist
+
+format_rag_results_task:
+  description: >
+    Transform the retrieved RAG results into a comprehensive, well-structured guide.
+    
+    Input Processing:
+    Take the complete output from the previous RAG retrieval task and format it using format_content_as_guide.
+    The previous task returned detailed search results that need to be properly formatted.
+    
+    Parameters:
+    - retrieved_info: {execute_rag_retrieval_task}
+    - query: "{query}"
+    - topic: "{topic}"
+    - subject: "{subject}"
+    
+    Output Requirements:
+    - Return ONLY the clean JSON from the tool
+    - No markdown formatting or wrapper text
+    - Pure JSON starting with {{ and ending with }}
+    
+    The tool will automatically detect the input format and create an appropriate GuideOutline structure.
+  expected_output: >
+    Clean JSON string representing a complete GuideOutline object with title, introduction,
+    target_audience, sections array, and conclusion.
+  agent: content_formatter
+  context:
+    - execute_rag_retrieval_task

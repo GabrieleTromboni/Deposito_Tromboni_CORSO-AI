@@ -7,7 +7,7 @@ from langchain_openai import AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from progetto_crew_flows.models import GuideOutline, Section
-from progetto_crew_flows.crews.rag_crew.rag_crew import RAGCrew
+from progetto_crew_flows.crews.database_crew.database_crew import DatabaseCrew, create_database_crew
 from progetto_crew_flows.crews.search_crew.search_crew import SearchCrew
 import json
 from datetime import datetime
@@ -248,53 +248,93 @@ class WebRAGFlow(Flow[GuideCreatorState]):
         """Third/Fourth step: Route to appropriate crew based on validation"""
         
         if state.is_valid_subject and state.is_valid_topic:
+            # Check which database type to use - default to both (let crew decide)
             return 'use_RAG'
         else:
             return 'use_WEB_SEARCH'
 
     @listen('use_RAG')
     def use_RAG(self, state: GuideCreatorState) -> GuideCreatorState:
-        """Use RAG crew for processing"""
+        """Use DatabaseCrew for RAG processing with both FAISS and Qdrant support"""
         print(f"🚀 Starting RAG processing for query: {state.query}")
         
         try:
-            crew = RAGCrew()
-            result = crew.kickoff(inputs={
-                "query": state.query,
-                "subject": state.subject,
-                "topic": state.topic
-            })
+            # Create DatabaseCrew instance
+            database_crew = create_database_crew()
             
-            print(f"✅ RAG crew completed. Result type: {type(result)}")
-            state.source_type = "RAG"
+            # Determine available databases (check both FAISS and Qdrant)
+            available_databases = []
             
-            # Handle the result based on its type
-            if isinstance(result, GuideOutline):
-                print("✅ Result is already a GuideOutline")
-                state.guide_outline = result
-            elif isinstance(result, dict):
-                print("✅ Converting dict to GuideOutline")
-                # Parse dictionary into GuideOutline
-                state.guide_outline = GuideOutline(**result)
-            elif isinstance(result, str):
-                print("✅ Parsing string result")
-                try:
-                    # Try to parse JSON string
-                    import json
-                    guide_data = json.loads(result)
-                    state.guide_outline = GuideOutline(**guide_data)
-                    print("✅ Successfully parsed JSON string to GuideOutline")
-                except Exception as parse_error:
-                    print(f"⚠️ Failed to parse JSON: {parse_error}")
-                    # Create a basic outline from string result
+            # Check for FAISS database
+            import os
+            faiss_path = "RAG_database"
+            if os.path.exists(faiss_path) and os.path.exists(os.path.join(faiss_path, "index.faiss")):
+                available_databases.append("faiss")
+                print("✅ FAISS database detected")
+            
+            # Check for Qdrant database (assume available if service is running)
+            try:
+                from qdrant_client import QdrantClient
+                client = QdrantClient(url="http://localhost:6333")
+                collections = client.get_collections()
+                if collections.collections:
+                    available_databases.append("qdrant")
+                    print("✅ Qdrant database detected")
+            except Exception:
+                print("⚠️ Qdrant database not available")
+            
+            if not available_databases:
+                available_databases = ["faiss"]  # Default fallback
+                print("⚠️ No databases detected, using FAISS as fallback")
+            
+            # Prefer Qdrant if available, otherwise use FAISS
+            database_type = "qdrant" if "qdrant" in available_databases else "faiss"
+            
+            print(f"🗄️ Using {database_type.upper()} database for RAG")
+            
+            # Execute RAG retrieval
+            result = database_crew.execute_rag(
+                query=state.query,
+                subject=state.subject,
+                topic=state.topic,
+                database_type=database_type,
+                available_databases=available_databases
+            )
+            
+            print(f"✅ DatabaseCrew completed. Result type: {type(result)}")
+            state.source_type = f"RAG_{database_type.upper()}"
+            
+            # Handle the result based on its structure
+            if isinstance(result, dict):
+                if result.get('status') == 'success':
+                    guide_data = result.get('result', {})
+                    if isinstance(guide_data, dict) and 'title' in guide_data:
+                        print("✅ Converting result to GuideOutline")
+                        state.guide_outline = GuideOutline(**guide_data)
+                    else:
+                        print("⚠️ Unexpected result structure")
+                        # Create a basic outline from the result
+                        state.guide_outline = GuideOutline(
+                            title=f"{state.subject.title()} Guide: {state.topic.title()}",
+                            introduction=f"Information about {state.topic} in {state.subject}",
+                            target_audience=f"Professionals and specialists in {state.subject}",
+                            sections=[
+                                Section(title="Retrieved Information", description=str(guide_data)[:500])
+                            ],
+                            conclusion="Information retrieved from specialized knowledge base."
+                        )
+                else:
+                    # Handle error from DatabaseCrew
+                    error_msg = result.get('message', 'Unknown error')
+                    print(f"❌ DatabaseCrew error: {error_msg}")
                     state.guide_outline = GuideOutline(
-                        title=f"{state.subject.title()} Guide: {state.topic.title()}",
-                        introduction=f"Information about {state.topic} in {state.subject}",
-                        target_audience=f"Professionals and specialists in {state.subject}",
+                        title=f"Error Processing: {state.topic}",
+                        introduction=f"An error occurred while processing your query about {state.topic}.",
+                        target_audience="General audience",
                         sections=[
-                            Section(title="Retrieved Information", description=str(result)[:500])
+                            Section(title="Error Information", description=f"Error: {error_msg}")
                         ],
-                        conclusion="Information retrieved from specialized knowledge base."
+                        conclusion="Please try again with a different query."
                     )
             else:
                 print(f"⚠️ Unexpected result type: {type(result)}")
@@ -303,16 +343,20 @@ class WebRAGFlow(Flow[GuideCreatorState]):
                     title=f"{state.subject.title()} Guide: {state.topic.title()}",
                     introduction=f"Information about {state.topic} in {state.subject}",
                     target_audience=f"Professionals in {state.subject}",
-                    sections=self._parse_sections_from_result(result),
+                    sections=[
+                        Section(title="Retrieved Information", description=str(result)[:500])
+                    ],
                     conclusion="Information retrieved from knowledge base."
                 )
             
             # Add RAG-specific sources
-            state.sources = [f"RAG Database - {state.subject}/{state.topic}"]
+            state.sources = [f"RAG Database ({database_type.upper()}) - {state.subject}/{state.topic}"]
             print("✅ RAG processing completed successfully")
             
         except Exception as e:
             print(f"❌ Error in RAG processing: {e}")
+            import traceback
+            traceback.print_exc()
             # Create fallback guide on error
             state.guide_outline = GuideOutline(
                 title=f"Error Processing: {state.topic}",

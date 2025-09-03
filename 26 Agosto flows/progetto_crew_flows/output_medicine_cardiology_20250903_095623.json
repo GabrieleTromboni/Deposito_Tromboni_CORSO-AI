@@ -1,0 +1,32 @@
+{
+  "query": "Explain cardiology principles",
+  "subject": "medicine",
+  "topic": "cardiology",
+  "audience_level": "professional",
+  "guide_outline": {
+    "title": "Error Processing: cardiology",
+    "introduction": "An error occurred while processing your query about cardiology.",
+    "target_audience": "General audience",
+    "sections": [
+      {
+        "title": "Error Information",
+        "description": "Error: Unknown error"
+      }
+    ],
+    "conclusion": "Please try again with a different query."
+  },
+  "sections_content": {},
+  "source_type": "RAG_FAISS",
+  "sources": [
+    "RAG Database (FAISS) - medicine/cardiology"
+  ],
+  "confidence_score": 0.95,
+  "is_valid_subject": true,
+  "is_valid_topic": true,
+  "found_subjects": [
+    "medicine"
+  ],
+  "found_topics": [
+    "cardiology"
+  ]
+}
