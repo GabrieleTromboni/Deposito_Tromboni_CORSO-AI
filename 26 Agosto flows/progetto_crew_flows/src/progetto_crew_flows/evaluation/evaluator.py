@@ -5,7 +5,6 @@ Motore principale che esegue tutte le valutazioni
 
 import os
 import time
-import psutil
 import threading
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime
@@ -13,17 +12,35 @@ import json
 from pathlib import Path
 import traceback
 
-from langchain_openai import AzureChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from dotenv import load_dotenv
+# Try to import optional dependencies with fallbacks
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("⚠️ psutil not available. Memory usage tracking disabled.")
+
+try:
+    from langchain_openai import AzureChatOpenAI
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_core.output_parsers import StrOutputParser
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+    print("⚠️ LangChain not available. LLM evaluation disabled.")
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    DOTENV_AVAILABLE = True
+except ImportError:
+    DOTENV_AVAILABLE = False
+    print("⚠️ python-dotenv not available. Using system environment variables only.")
 
 from .metrics import (
     EvaluationResult, QualityMetrics, PerformanceMetrics, 
     CostMetrics, AccuracyMetrics, EvaluationType
 )
-
-load_dotenv()
 
 class CrewEvaluator:
     """
@@ -58,6 +75,9 @@ class CrewEvaluator:
     
     def _init_llm(self):
         """Inizializza LLM per valutazioni qualitative"""
+        if not LANGCHAIN_AVAILABLE:
+            return None
+        
         return AzureChatOpenAI(
             deployment_name=os.getenv("CHAT_MODEL") or os.getenv("MODEL"),
             openai_api_version=os.getenv("AZURE_API_VERSION"),
@@ -71,12 +91,19 @@ class CrewEvaluator:
         Inizia una nuova valutazione
         Ritorna un context manager per tracking automatico
         """
+        start_memory = 0.0
+        if PSUTIL_AVAILABLE:
+            try:
+                start_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+            except Exception:
+                start_memory = 0.0
+        
         evaluation_context = {
             'query': query,
             'subject': subject,
             'topic': topic,
             'start_time': time.time(),
-            'start_memory': psutil.Process().memory_info().rss / 1024 / 1024,  # MB
+            'start_memory': start_memory,
             'errors': [],
             'warnings': []
         }
@@ -91,12 +118,16 @@ class CrewEvaluator:
         Termina valutazione e calcola tutte le metriche
         """
         end_time = time.time()
-        end_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+        if PSUTIL_AVAILABLE:
+            end_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+            memory_usage = end_memory - context['start_memory']
+        else:
+            memory_usage = 0.0
         
         # Calcola metriche di performance
         performance_metrics = PerformanceMetrics(
             total_duration=end_time - context['start_time'],
-            memory_usage_mb=end_memory - context['start_memory'],
+            memory_usage_mb=memory_usage,
             crew_execution_time=end_time - context['start_time']  # Placeholder
         )
         
@@ -170,14 +201,14 @@ class CrewEvaluator:
                 ("system", """Sei un esperto valutatore di contenuti. Valuta il seguente contenuto su una scala 0-1 per ciascuna metrica.
                 
                 Rispondi SOLO con un JSON nel formato:
-                {
+                {{
                     "clarity_score": 0.85,
                     "coherence_score": 0.90,
                     "completeness_score": 0.80,
                     "relevance_score": 0.95,
                     "accuracy_score": 0.85,
                     "language_quality": 0.90
-                }
+                }}
                 
                 Criteri di valutazione:
                 - clarity_score: Chiarezza e comprensibilità del testo
@@ -230,12 +261,12 @@ class CrewEvaluator:
                 ("system", """Valuta l'accuratezza del contenuto su scala 0-1 per ciascuna metrica.
                 
                 Rispondi SOLO con un JSON nel formato:
-                {
+                {{
                     "factual_accuracy": 0.85,
                     "source_reliability": 0.90,
                     "citation_accuracy": 0.80,
                     "topic_alignment": 0.95
-                }
+                }}
                 
                 Criteri:
                 - factual_accuracy: Accuratezza dei fatti presentati
@@ -282,9 +313,10 @@ class CrewEvaluator:
         
         total_tokens = estimated_input_tokens + estimated_output_tokens
         
-        # Calcola costo
-        input_cost = (estimated_input_tokens / 1000) * self.config['cost_per_1k_tokens']['input']
-        output_cost = (estimated_output_tokens / 1000) * self.config['cost_per_1k_tokens']['output']
+        # Calcola costo usando configurazione
+        cost_config = self.config.get('cost_per_1k_tokens', {'input': 0.01, 'output': 0.03})
+        input_cost = (estimated_input_tokens / 1000) * cost_config['input']
+        output_cost = (estimated_output_tokens / 1000) * cost_config['output']
         total_cost = input_cost + output_cost
         
         return CostMetrics(

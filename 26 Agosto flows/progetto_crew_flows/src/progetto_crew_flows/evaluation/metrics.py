@@ -7,12 +7,27 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Union
 from datetime import datetime, timedelta
 import json
-import pandas as pd
 from pathlib import Path
 import time
 import traceback
 from enum import Enum
-from pydantic import BaseModel
+
+# Conditional imports
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    print("⚠️ pandas not available. DataFrame export disabled.")
+
+try:
+    from pydantic import BaseModel
+    PYDANTIC_AVAILABLE = True
+except ImportError:
+    PYDANTIC_AVAILABLE = False
+    # Fallback BaseModel for compatibility
+    class BaseModel:
+        pass
 
 # Enum per i tipi di valutazione
 class EvaluationType(Enum):

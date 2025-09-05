@@ -1,0 +1,48 @@
+{
+  "timestamp": "2025-09-05T18:37:50.303388",
+  "query": "Cos'è il machine learning?",
+  "subject": "AI",
+  "topic": "machine_learning",
+  "source_type": "Unknown",
+  "quality_metrics": {
+    "clarity_score": 0.9,
+    "coherence_score": 0.92,
+    "completeness_score": 0.85,
+    "relevance_score": 0.95,
+    "accuracy_score": 0.88,
+    "language_quality": 0.93
+  },
+  "performance_metrics": {
+    "total_duration": 0.8008191585540771,
+    "crew_execution_time": 0.8008191585540771,
+    "rag_retrieval_time": 0.0,
+    "llm_inference_time": 0.0,
+    "memory_usage_mb": 0.0,
+    "token_usage": {}
+  },
+  "cost_metrics": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "estimated_cost_usd": 0.0,
+    "cost_per_query": 0.0
+  },
+  "accuracy_metrics": {
+    "factual_accuracy": 0.9,
+    "source_reliability": 0.7,
+    "citation_accuracy": 0.5,
+    "topic_alignment": 0.95
+  },
+  "generated_content": {
+    "answer": "Risposta rapida per 'Cos'è il machine learning?' su AI/machine_learning. Contenuto di test per verificare il funzionamento del sistema di valutazione.",
+    "source_type": "Quick Test",
+    "confidence": 0.85
+  },
+  "sources_used": [
+    "Unknown source"
+  ],
+  "errors": [],
+  "warnings": [],
+  "overall_score": 0.8880806028048197,
+  "grade": "B"
+}

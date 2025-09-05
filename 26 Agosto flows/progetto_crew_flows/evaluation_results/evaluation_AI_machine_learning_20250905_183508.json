@@ -1,0 +1,48 @@
+{
+  "timestamp": "2025-09-05T18:35:08.533709",
+  "query": "Cos'è il machine learning?",
+  "subject": "AI",
+  "topic": "machine_learning",
+  "source_type": "Unknown",
+  "quality_metrics": {
+    "clarity_score": 0.7,
+    "coherence_score": 0.7,
+    "completeness_score": 0.7,
+    "relevance_score": 0.7,
+    "accuracy_score": 0.7,
+    "language_quality": 0.7
+  },
+  "performance_metrics": {
+    "total_duration": 0.801898717880249,
+    "crew_execution_time": 0.801898717880249,
+    "rag_retrieval_time": 0.0,
+    "llm_inference_time": 0.0,
+    "memory_usage_mb": 0.0,
+    "token_usage": {}
+  },
+  "cost_metrics": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "estimated_cost_usd": 0.0,
+    "cost_per_query": 0.0
+  },
+  "accuracy_metrics": {
+    "factual_accuracy": 0.6,
+    "source_reliability": 0.6,
+    "citation_accuracy": 0.6,
+    "topic_alignment": 0.6
+  },
+  "generated_content": {
+    "answer": "Risposta per 'Cos'è il machine learning?' su AI/machine_learning",
+    "source_type": "Quick Test",
+    "confidence": 0.85
+  },
+  "sources_used": [
+    "Unknown source"
+  ],
+  "errors": [],
+  "warnings": [],
+  "overall_score": 0.7573270042737325,
+  "grade": "C"
+}

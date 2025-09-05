@@ -3,13 +3,26 @@ Dashboard e reporting per visualizzazione risultati valutazione CrewAI
 """
 
 import json
-import pandas as pd
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
-import matplotlib.pyplot as plt
-import seaborn as sns
 from dataclasses import asdict
+
+# Conditional imports
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    print("⚠️ pandas not available. DataFrame functionality disabled.")
+
+try:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    PLOTTING_AVAILABLE = True
+except ImportError:
+    PLOTTING_AVAILABLE = False
+    print("⚠️ matplotlib/seaborn not available. Plotting functionality disabled.")
 
 from .metrics import EvaluationResult
 
@@ -22,9 +35,10 @@ class EvaluationDashboard:
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(exist_ok=True)
         
-        # Setup plotting style
-        plt.style.use('default')
-        sns.set_palette("husl")
+        # Setup plotting style only if available
+        if PLOTTING_AVAILABLE:
+            plt.style.use('default')
+            sns.set_palette("husl")
     
     def load_evaluation_history(self, days: int = 30) -> List[EvaluationResult]:
         """Carica cronologia valutazioni degli ultimi N giorni"""
@@ -153,6 +167,9 @@ class EvaluationDashboard:
     
     def create_performance_charts(self, save_path: Optional[str] = None) -> Dict[str, str]:
         """Crea grafici di performance e li salva"""
+        if not PANDAS_AVAILABLE or not PLOTTING_AVAILABLE:
+            return {"error": "pandas o matplotlib non disponibili. Impossibile creare grafici."}
+        
         evaluations = self.load_evaluation_history(30)
         
         if len(evaluations) < 2:

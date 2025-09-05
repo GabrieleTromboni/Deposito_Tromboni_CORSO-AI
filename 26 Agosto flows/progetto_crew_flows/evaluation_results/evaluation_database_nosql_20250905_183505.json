@@ -1,0 +1,48 @@
+{
+  "timestamp": "2025-09-05T18:35:05.520259",
+  "query": "Guida ai database NoSQL",
+  "subject": "database",
+  "topic": "nosql",
+  "source_type": "RAG Database",
+  "quality_metrics": {
+    "clarity_score": 0.7,
+    "coherence_score": 0.7,
+    "completeness_score": 0.7,
+    "relevance_score": 0.7,
+    "accuracy_score": 0.7,
+    "language_quality": 0.7
+  },
+  "performance_metrics": {
+    "total_duration": 1.5056679248809814,
+    "crew_execution_time": 1.5056679248809814,
+    "rag_retrieval_time": 0.0,
+    "llm_inference_time": 0.0,
+    "memory_usage_mb": 0.00390625,
+    "token_usage": {}
+  },
+  "cost_metrics": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "estimated_cost_usd": 0.0,
+    "cost_per_query": 0.0
+  },
+  "accuracy_metrics": {
+    "factual_accuracy": 0.8,
+    "source_reliability": 0.8,
+    "citation_accuracy": 0.8,
+    "topic_alignment": 0.8
+  },
+  "generated_content": {
+    "content": "None"
+  },
+  "sources_used": [
+    "Unknown source"
+  ],
+  "errors": [
+    "Object of type obj is not JSON serializable"
+  ],
+  "warnings": [],
+  "overall_score": 0.8149811069170633,
+  "grade": "B"
+}
