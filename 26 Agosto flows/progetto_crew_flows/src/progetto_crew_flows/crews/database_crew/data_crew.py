@@ -15,10 +15,10 @@ except ImportError as e:
     print(f"Warning: Could not import RAG tools v2: {e}")
     # Try fallback to original tools
     try:
-        from tools.rag_tool import generate_documents, create_vectordb, store_in_vectordb
+        from tools.rag_tool import generate_documents_as_files, create_vectordb, store_individual_documents
         # Create aliases for compatibility
-        generate_documents_as_files = generate_documents
-        store_individual_documents = store_in_vectordb
+        generate_documents_as_files = generate_documents_as_files
+        store_individual_documents = store_individual_documents
         recreate_collection_for_rag = None
         store_documents_in_qdrant = None
     except ImportError as e2:
